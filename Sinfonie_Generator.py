@@ -6,7 +6,6 @@ import tkinter as tk
 from tkinter import filedialog, ttk, messagebox
 from pypdf import PdfReader, PdfWriter
 
-# Global configuration
 OUTPUT_FOLDER = "output"
 
 class Voice:
@@ -42,12 +41,14 @@ class ScoreGUI:
         self.master = master
         self.master.title("Score Assembler")
         
-        self.master.geometry("1000x700")
-        self.master.minsize(850, 500)
+        self.master.geometry("850x600")
+        self.master.minsize(650, 300)
         
         self.voices = {}
         self.symphony_frames = []
         self.voice_comboboxes = []
+        
+        self._is_loading = False
 
         self.setup_metadata_ui()
         self.setup_notebook_ui()
@@ -69,8 +70,8 @@ class ScoreGUI:
         self.composer_entry.grid(row=1, column=1, padx=5, pady=5)
 
         btn_frame = tk.Frame(frame, bg="#f9f9f9")
-        btn_frame.grid(row=2, column=0, columnspan=2, pady=10)
-        tk.Button(btn_frame, text="Load JSON", width=20, command=self.load_from_json).pack(side="left", padx=5)
+        btn_frame.grid(row=2, column=0, columnspan=2, pady=10, sticky="w")
+        tk.Button(btn_frame, text="Load JSON", width=15, command=self.load_from_json).pack(side="left", padx=5)
 
     def setup_notebook_ui(self):
         """Initializes the tabbed interface for symphonies."""
@@ -111,8 +112,8 @@ class ScoreGUI:
             tab_name = f"Symphony {len(self.symphony_frames)+1}"
 
         tab_frame = tk.Frame(self.notebook, bg="#eaeaea")
-        
         plus_idx = next((i for i in range(self.notebook.index("end")) if self.notebook.tab(i, "text") == "+"), None)
+        
         if plus_idx is not None:
             self.notebook.insert(plus_idx, tab_frame, text=tab_name)
         else:
@@ -144,16 +145,16 @@ class ScoreGUI:
         self.notebook.add(plus_frame, text="+")
 
     def handle_tab_change(self, event):
-        """Detects selection of the '+' tab to spawn a new symphony."""
+        """Evaluates state context to prevent ghost rendering during UI teardowns."""
+        if self._is_loading: return
         current = self.notebook.select()
-        if not current: 
-            return
+        if not current: return
         try:
             if self.notebook.tab(current, "text") == "+":
                 self.add_symphony_tab()
                 self.notebook.select(self.notebook.index("end")-2)
         except tk.TclError:
-            return
+            pass
 
     def update_comboboxes(self):
         """Refreshes all dropdowns to include newly added voices."""
@@ -162,7 +163,7 @@ class ScoreGUI:
             cb['values'] = voice_list
 
     def add_file_row(self, parent_frame, canvas, data=None):
-        """Appends an editable row, handles inline context, and auto-focuses the viewport."""
+        """Appends an editable row and auto-focuses the viewport."""
         row_frame = tk.Frame(parent_frame, relief=tk.RIDGE, borderwidth=2, bg="#f5f5f5")
         row_frame.pack(padx=5, pady=5, fill="x")
 
@@ -180,12 +181,9 @@ class ScoreGUI:
             if path:
                 f_var.set(path)
                 try:
-                    if os.name == 'nt':
-                        os.startfile(path)
-                    elif sys.platform == 'darwin':
-                        subprocess.Popen(['open', path])
-                    else:
-                        subprocess.Popen(['xdg-open', path])
+                    if os.name == 'nt': os.startfile(path)
+                    elif sys.platform == 'darwin': subprocess.Popen(['open', path])
+                    else: subprocess.Popen(['xdg-open', path])
                 except Exception as e:
                     messagebox.showerror("Execution Error", f"Failed to open PDF:\n{e}")
 
@@ -242,7 +240,6 @@ class ScoreGUI:
         row_frame.state_vars = {"file": f_var, "voice": v_var, "start": s_var, "end": e_var}
         
         self.bind_all_children(row_frame, canvas)
-
         parent_frame.update_idletasks()
         canvas.yview_moveto(1.0)
 
@@ -274,17 +271,15 @@ class ScoreGUI:
         menu.tk_popup(event.x_root, event.y_root)
 
     def close_tab(self, index):
-        """Removes a tab and its associated data structures cleanly."""
+        """Removes a tab safely while managing focus shift."""
         try:
             current_selected = self.notebook.index(self.notebook.select())
         except tk.TclError:
             current_selected = -1
 
         if current_selected == index:
-            if index > 0:
-                self.notebook.select(index - 1)
-            elif len(self.notebook.tabs()) > 2:
-                self.notebook.select(index + 1)
+            if index > 0: self.notebook.select(index - 1)
+            elif len(self.notebook.tabs()) > 2: self.notebook.select(index + 1)
 
         tab_widget_name = self.notebook.tabs()[index]
         tab_widget = self.master.nametowidget(tab_widget_name)
@@ -306,6 +301,8 @@ class ScoreGUI:
         
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
+
+        self._is_loading = True
 
         self.title_entry.delete(0, tk.END)
         self.title_entry.insert(0, data.get("metadata", {}).get("suite_title", ""))
@@ -335,9 +332,10 @@ class ScoreGUI:
                 self.add_file_row(current_sf, canvas, data=entry)
         
         self.update_comboboxes()
+        self._is_loading = False
 
     def export_all(self):
-        """Parses the current UI state, creates dynamic JSON config, and triggers PDF processing."""
+        """Parses the UI state natively, creates JSON, and triggers PDF processing."""
         title = self.title_entry.get().strip()
         composer = self.composer_entry.get().strip()
         if not title or not composer:
@@ -380,7 +378,6 @@ class ScoreGUI:
             
             export_data["symphonies"].append(symphony_data)
 
-        # Dynamic configuration filename generation
         config_filename = f"{title.replace(' ', '_')}_config.json"
         with open(config_filename, "w", encoding="utf-8") as f:
             json.dump(export_data, f, indent=4)
