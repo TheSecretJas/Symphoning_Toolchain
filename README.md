@@ -52,6 +52,3 @@ Dieses Tool dient der Extraktion spezifischer Seitenbereiche aus umfassenden PDF
    - Zu viel hinzugefügte Sätze können über einen Rechtsklick auf den Satz und "close tab" wieder geschlossen werden. 
 6. Klicke auf "Alle exportieren", um die PDFs im Ordner `output/` zu erstellen und die Konfiguration zu speichern.
 
-
-### Known Issues ###
-Aktuell kann in der UI nach der Eingabe nicht mehr bearbeitet werden, Fehler können erst nach Abschluss ausgebessert werden. Ist aber in Planung
