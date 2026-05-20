@@ -1,5 +1,7 @@
 import os
+import sys
 import json
+import subprocess
 import tkinter as tk
 from tkinter import filedialog, ttk, messagebox
 from pypdf import PdfReader, PdfWriter
@@ -41,6 +43,11 @@ class ScoreGUI:
     def __init__(self, master):
         self.master = master
         self.master.title("Score Assembler")
+        
+        # Enforce initial and minimum window dimensions to prevent widget clipping
+        self.master.geometry("1000x700")
+        self.master.minsize(850, 500)
+        
         self.voices = {}
         self.symphony_frames = []
         self.voice_comboboxes = []
@@ -126,7 +133,6 @@ class ScoreGUI:
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        # Bind scroll to empty canvas background
         self.bind_scroll(canvas, canvas)
 
         btn_frame = tk.Frame(tab_frame, bg="#eaeaea")
@@ -158,23 +164,33 @@ class ScoreGUI:
         row_frame = tk.Frame(parent_frame, relief=tk.RIDGE, borderwidth=2, bg="#f5f5f5")
         row_frame.pack(padx=5, pady=5, fill="x")
 
-        # UI Variables
         f_var = tk.StringVar(value=data["file"] if data else "")
         v_var = tk.StringVar(value=data["voice_name"] if data else "")
         s_var = tk.StringVar(value=str(data["start_page"]) if data else "")
         e_var = tk.StringVar(value=str(data["end_page"]) if data else "")
 
-        # Row 0: File input
+        # File Input Row
         tk.Label(row_frame, text="File:", bg="#f5f5f5").grid(row=0, column=0, sticky="w", padx=5, pady=2)
         tk.Entry(row_frame, textvariable=f_var, width=40).grid(row=0, column=1, sticky="w", padx=5)
         
         def browse():
+            """Opens file dialog and launches the selected PDF in the default viewer."""
             path = filedialog.askopenfilename(filetypes=[("PDF Files", "*.pdf")])
-            if path: f_var.set(path)
+            if path:
+                f_var.set(path)
+                try:
+                    if os.name == 'nt':
+                        os.startfile(path)
+                    elif sys.platform == 'darwin':
+                        subprocess.Popen(['open', path])
+                    else:
+                        subprocess.Popen(['xdg-open', path])
+                except Exception as e:
+                    messagebox.showerror("Execution Error", f"Failed to open PDF:\n{e}")
 
         tk.Button(row_frame, text="Browse", command=browse).grid(row=0, column=2, sticky="w", padx=5)
 
-        # Row 1: Voice selection
+        # Voice Selection Row
         tk.Label(row_frame, text="Voice:", bg="#f5f5f5").grid(row=1, column=0, sticky="w", padx=5, pady=2)
         cb = ttk.Combobox(row_frame, textvariable=v_var, values=list(self.voices.keys()), state="readonly", width=37)
         cb.grid(row=1, column=1, sticky="w", padx=5)
@@ -209,7 +225,7 @@ class ScoreGUI:
 
         tk.Button(row_frame, text="Add", command=open_inline_voice_dialog).grid(row=1, column=2, sticky="w", padx=5)
 
-        # Row 2: Page ranges grouped in sub-frame
+        # Page Ranges Row
         tk.Label(row_frame, text="Pages:", bg="#f5f5f5").grid(row=2, column=0, sticky="w", padx=5, pady=2)
         page_frame = tk.Frame(row_frame, bg="#f5f5f5")
         page_frame.grid(row=2, column=1, sticky="w", padx=5)
@@ -227,7 +243,6 @@ class ScoreGUI:
 
         row_frame.state_vars = {"file": f_var, "voice": v_var, "start": s_var, "end": e_var}
         
-        # Apply global scrolling logic to this new row
         self.bind_all_children(row_frame, canvas)
 
     def rename_tab(self, event):
