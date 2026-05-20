@@ -1,35 +1,31 @@
 import os
-import sys
 import json
 import tkinter as tk
 from tkinter import filedialog, ttk, messagebox
 from pypdf import PdfReader, PdfWriter
 
-# ----------------------------
-# Globale Einstellungen
-# ----------------------------
-USE_GUI = False
+# Global configuration
+USE_GUI = True
 CONFIG_FILE = "Brahms_config.json"
 OUTPUT_FOLDER = "output"
 
-# ----------------------------
-# Stimme Klasse
-# ----------------------------
 class Voice:
+    """Represents an instrumental voice containing merged PDF pages."""
     def __init__(self, name):
         self.name = name
         self.pages = []
 
     def add_pages(self, file_path, start, end):
+        """Extracts specific pages from a PDF and appends them to the voice."""
         reader = PdfReader(file_path)
         max_page = len(reader.pages)
         if start < 1 or end > max_page:
-            raise ValueError(f"Seitenbereich ungültig: {start}-{end} (max. {max_page})")
+            raise ValueError(f"Invalid page range: {start}-{end} (max. {max_page})")
         for i in range(start-1, end):
-            page = reader.pages[i]
-            self.pages.append(page)
+            self.pages.append(reader.pages[i])
 
     def export_pdf(self, suite_title, composer):
+        """Writes the accumulated pages to a new PDF file."""
         os.makedirs(OUTPUT_FOLDER, exist_ok=True)
         filename = f"{suite_title}_{self.name}.pdf".replace(" ", "_")
         output_path = os.path.join(OUTPUT_FOLDER, filename)
@@ -38,78 +34,85 @@ class Voice:
             writer.add_page(page)
         with open(output_path, "wb") as f:
             writer.write(f)
-        print(f"✅ {self.name}-PDF erstellt: {output_path}")
+        print(f"Export successful: {output_path}")
 
-# ----------------------------
-# GUI Klasse
-# ----------------------------
 class ScoreGUI:
+    """Main graphical interface for managing PDF assembly."""
     def __init__(self, master):
         self.master = master
         self.master.title("Score Assembler")
         self.voices = {}
-        self.suite_title = ""
-        self.composer = ""
-        self.symphonies = []
-        self.tabs = {}
+        self.symphony_frames = []
+        self.voice_comboboxes = []
 
-        self.create_metadata_frame()
-        self.create_notebook()
+        self.setup_metadata_ui()
+        self.setup_notebook_ui()
 
-        # Tab Features
-        self.notebook.bind("<Double-Button-1>", self.rename_tab)  # Doppelklick → Name ändern
-        self.notebook.bind("<Button-3>", self.rightclick_tab)     # Rechtsklick → Tab schließen
+        self.notebook.bind("<Double-Button-1>", self.rename_tab)
+        self.notebook.bind("<Button-3>", self.rightclick_tab)
 
-    # ----------------------------
-    # Metadaten
-    # ----------------------------
-    def create_metadata_frame(self):
+    def setup_metadata_ui(self):
+        """Initializes the upper control panel."""
         frame = tk.Frame(self.master, padx=10, pady=10, bg="#f9f9f9")
         frame.pack(padx=10, pady=10, fill="x")
 
-        tk.Label(frame, text="Titel der Suite:", bg="#f9f9f9").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        tk.Label(frame, text="Suite Title:", bg="#f9f9f9").grid(row=0, column=0, sticky="w")
         self.title_entry = tk.Entry(frame, width=40)
         self.title_entry.grid(row=0, column=1, padx=5, pady=5)
 
-        tk.Label(frame, text="Komponist:", bg="#f9f9f9").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+        tk.Label(frame, text="Composer:", bg="#f9f9f9").grid(row=1, column=0, sticky="w")
         self.composer_entry = tk.Entry(frame, width=40)
         self.composer_entry.grid(row=1, column=1, padx=5, pady=5)
 
-        tk.Button(frame, text="Stimmgruppe hinzufügen", width=30, command=self.create_voices).grid(row=2, column=0, columnspan=2, pady=10)
+        btn_frame = tk.Frame(frame, bg="#f9f9f9")
+        btn_frame.grid(row=2, column=0, columnspan=2, pady=10)
+        tk.Button(btn_frame, text="Load JSON", width=20, command=self.load_from_json).pack(side="left", padx=5)
 
-    # ----------------------------
-    # Notebook / Tabs
-    # ----------------------------
-    def create_notebook(self):
+    def setup_notebook_ui(self):
+        """Initializes the tabbed interface for symphonies."""
         self.notebook = ttk.Notebook(self.master)
         self.notebook.pack(fill="both", expand=True, padx=10, pady=5)
-        self.add_symphony_tab()  # erste Sinfonie Tab
+        self.add_symphony_tab()
         self.add_plus_tab()
-        self.notebook.bind("<<NotebookTabChanged>>", self.check_plus_tab)
+        self.notebook.bind("<<NotebookTabChanged>>", self.handle_tab_change)
+
+    def bind_scroll(self, widget, canvas):
+        """Attaches platform-specific scroll events to a specific widget."""
+        def _scroll_mw(event):
+            if canvas.winfo_ismapped():
+                if os.name == 'nt':
+                    canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+                else:
+                    canvas.yview_scroll(int(-1*event.delta), "units")
+        
+        def _scroll_up(event):
+            if canvas.winfo_ismapped(): canvas.yview_scroll(-1, "units")
+            
+        def _scroll_down(event):
+            if canvas.winfo_ismapped(): canvas.yview_scroll(1, "units")
+
+        widget.bind("<MouseWheel>", _scroll_mw)
+        widget.bind("<Button-4>", _scroll_up)
+        widget.bind("<Button-5>", _scroll_down)
+
+    def bind_all_children(self, widget, canvas):
+        """Recursively binds scroll events to a widget hierarchy."""
+        self.bind_scroll(widget, canvas)
+        for child in widget.winfo_children():
+            self.bind_all_children(child, canvas)
 
     def add_symphony_tab(self, tab_name=None):
+        """Creates a new tab for a symphony section."""
         if tab_name is None:
-            tab_name = f"Sinfonie {len(self.symphonies)+1}"
+            tab_name = f"Symphony {len(self.symphony_frames)+1}"
 
         tab_frame = tk.Frame(self.notebook, bg="#eaeaea")
-
-        # Prüfen, ob + Tab existiert
-        plus_tab_index = None
-        for i in range(self.notebook.index("end")):
-            if self.notebook.tab(i, "text") == "+":
-                plus_tab_index = i
-                break
-
-        if plus_tab_index is not None:
-            self.notebook.insert(plus_tab_index, tab_frame, text=tab_name)
+        
+        plus_idx = next((i for i in range(self.notebook.index("end")) if self.notebook.tab(i, "text") == "+"), None)
+        if plus_idx is not None:
+            self.notebook.insert(plus_idx, tab_frame, text=tab_name)
         else:
             self.notebook.add(tab_frame, text=tab_name)
-
-        style = ttk.Style()
-        style.configure("TNotebook.Tab", padding=[12, 4])
-        style.map("TNotebook.Tab",
-                  background=[("selected", "#d0e0ff")],
-                  foreground=[("selected", "black")])
 
         container = tk.Frame(tab_frame)
         container.pack(fill="both", expand=True)
@@ -123,231 +126,236 @@ class ScoreGUI:
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        def _on_mousewheel(event):
-            if os.name == 'nt':
-                canvas.yview_scroll(-1 * int(event.delta / 120), "units")
-            else:
-                canvas.yview_scroll(-1 * int(event.delta), "units")
-        canvas.bind_all("<MouseWheel>", _on_mousewheel)
-        canvas.bind_all("<Button-4>", lambda e: canvas.yview_scroll(-1, "units"))
-        canvas.bind_all("<Button-5>", lambda e: canvas.yview_scroll(1, "units"))
+        # Bind scroll to empty canvas background
+        self.bind_scroll(canvas, canvas)
 
         btn_frame = tk.Frame(tab_frame, bg="#eaeaea")
         btn_frame.pack(pady=5)
-        tk.Button(btn_frame, text="Datei hinzufügen", width=20, command=lambda: self.add_file_frame(files_frame)).pack(side="left", padx=5)
+        tk.Button(btn_frame, text="Add File Entry", width=20, command=lambda: self.add_file_row(files_frame, canvas)).pack()
 
-        self.symphonies.append([])
-        self.tabs[len(self.symphonies)-1] = files_frame
+        self.symphony_frames.append(files_frame)
 
     def add_plus_tab(self):
+        """Adds the persistent tab used for creating new symphonies."""
         plus_frame = tk.Frame(self.notebook)
         self.notebook.add(plus_frame, text="+")
-        style = ttk.Style()
-        style.configure("TNotebook.Tab", padding=[12, 4])
-        style.map("TNotebook.Tab",
-                  background=[("selected", "#c0ffc0")],
-                  foreground=[("selected", "black")])
 
-    def check_plus_tab(self, event):
+    def handle_tab_change(self, event):
+        """Detects selection of the '+' tab to spawn a new symphony."""
         current = self.notebook.select()
-        text = self.notebook.tab(current, "text")
-        if text == "+":
+        if self.notebook.tab(current, "text") == "+":
             self.add_symphony_tab()
             self.notebook.select(self.notebook.index("end")-2)
 
-    # ----------------------------
-    # Stimmen erstellen
-    # ----------------------------
-    def create_voices(self):
-        self.suite_title = self.title_entry.get()
-        self.composer = self.composer_entry.get()
-        if not self.suite_title or not self.composer:
-            messagebox.showerror("Fehler", "Bitte Titel und Komponist eingeben")
-            return
+    def update_comboboxes(self):
+        """Refreshes all dropdowns to include newly added voices."""
+        voice_list = list(self.voices.keys())
+        for cb in self.voice_comboboxes:
+            cb['values'] = voice_list
 
-        self.voice_window = tk.Toplevel(self.master)
-        self.voice_window.title("Stimmgruppe hinzufügen")
-        self.voice_window.geometry("600x300")
-        self.voice_window.configure(bg="#f0f0f0")
+    def add_file_row(self, parent_frame, canvas, data=None):
+        """Appends an editable row for PDF assignment with inline addition and reliable layout."""
+        row_frame = tk.Frame(parent_frame, relief=tk.RIDGE, borderwidth=2, bg="#f5f5f5")
+        row_frame.pack(padx=5, pady=5, fill="x")
 
-        tk.Label(self.voice_window, text="Name der Stimmgruppe:", bg="#f0f0f0").grid(row=0, column=0, padx=10, pady=10, sticky="w")
-        self.voice_name_entry = tk.Entry(self.voice_window, width=30)
-        self.voice_name_entry.grid(row=0, column=1, padx=10, pady=10, sticky="w")
-        self.voice_name_entry.focus_set()
+        # UI Variables
+        f_var = tk.StringVar(value=data["file"] if data else "")
+        v_var = tk.StringVar(value=data["voice_name"] if data else "")
+        s_var = tk.StringVar(value=str(data["start_page"]) if data else "")
+        e_var = tk.StringVar(value=str(data["end_page"]) if data else "")
 
-        tk.Button(self.voice_window, text="Hinzufügen", width=12, command=self.add_voice).grid(row=0, column=2, padx=10, pady=10)
-        tk.Button(self.voice_window, text="Fertig", width=12, command=self.voice_window.destroy).grid(row=1, column=0, columnspan=3, pady=10)
+        # Row 0: File input
+        tk.Label(row_frame, text="File:", bg="#f5f5f5").grid(row=0, column=0, sticky="w", padx=5, pady=2)
+        tk.Entry(row_frame, textvariable=f_var, width=40).grid(row=0, column=1, sticky="w", padx=5)
+        
+        def browse():
+            path = filedialog.askopenfilename(filetypes=[("PDF Files", "*.pdf")])
+            if path: f_var.set(path)
 
-        self.added_voices_frame = tk.Frame(self.voice_window, bg="#f0f0f0")
-        self.added_voices_frame.grid(row=2, column=0, columnspan=3, padx=10, pady=10, sticky="w")
+        tk.Button(row_frame, text="Browse", command=browse).grid(row=0, column=2, sticky="w", padx=5)
 
-        self.voice_window.bind("<Return>", self.handle_voice_enter)
+        # Row 1: Voice selection
+        tk.Label(row_frame, text="Voice:", bg="#f5f5f5").grid(row=1, column=0, sticky="w", padx=5, pady=2)
+        cb = ttk.Combobox(row_frame, textvariable=v_var, values=list(self.voices.keys()), state="readonly", width=37)
+        cb.grid(row=1, column=1, sticky="w", padx=5)
+        self.voice_comboboxes.append(cb)
 
-    def handle_voice_enter(self, event):
-        if not self.voice_name_entry.get().strip():
-            self.voice_window.destroy()
-        else:
-            self.add_voice()
+        def open_inline_voice_dialog():
+            v_win = tk.Toplevel(self.master)
+            v_win.title("New Voice")
+            v_win.geometry("+%d+%d" % (self.master.winfo_rootx() + 100, self.master.winfo_rooty() + 100))
+            
+            tk.Label(v_win, text="Voice Name:").grid(row=0, column=0, padx=5, pady=5)
+            v_entry = tk.Entry(v_win, width=20)
+            v_entry.grid(row=0, column=1, padx=5, pady=5)
+            v_entry.focus_set()
 
-    def add_voice(self):
-        name = self.voice_name_entry.get().strip()
-        if name and name not in self.voices:
-            self.voices[name] = Voice(name)
-            tk.Label(self.added_voices_frame, text=f"Stimme hinzugefügt: {name}", fg="blue", bg="#f0f0f0").pack(anchor="w")
-            self.voice_name_entry.delete(0, tk.END)
+            feedback_label = tk.Label(v_win, text="", fg="green")
+            feedback_label.grid(row=1, column=0, columnspan=3)
 
-    # ----------------------------
-    # Datei Frame hinzufügen
-    # ----------------------------
-    def add_file_frame(self, parent_frame):
-        frame = tk.Frame(parent_frame, relief=tk.RIDGE, borderwidth=2, bg="#f5f5f5")
-        frame.pack(padx=5, pady=5, fill="x")
+            def confirm(event=None):
+                val = v_entry.get().strip()
+                if val:
+                    if val not in self.voices:
+                        self.voices[val] = True
+                        self.update_comboboxes()
+                    v_var.set(val) 
+                    feedback_label.config(text=f"'{val}' added successfully!")
+                    v_win.update()
+                    v_win.after(800, v_win.destroy)
 
-        tk.Label(frame, text="Datei:", bg="#f5f5f5").grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        file_path_var = tk.StringVar()
-        file_entry = tk.Entry(frame, textvariable=file_path_var, width=50)
-        file_entry.grid(row=0, column=1, padx=5, pady=5)
+            tk.Button(v_win, text="Add", command=confirm).grid(row=0, column=2, padx=5)
+            v_win.bind("<Return>", confirm)
 
-        def browse_file():
-            path = filedialog.askopenfilename(parent=self.master, filetypes=[("PDF-Dateien", "*.pdf")])
-            if path:
-                file_path_var.set(path)
-                try:
-                    if os.name == 'nt':
-                        os.startfile(path)
-                    elif os.name == 'posix':
-                        import subprocess
-                        subprocess.Popen(['open' if sys.platform == 'darwin' else 'xdg-open', path])
-                except Exception as e:
-                    messagebox.showerror("Fehler", f"PDF konnte nicht geöffnet werden:\n{e}")
+        tk.Button(row_frame, text="Add", command=open_inline_voice_dialog).grid(row=1, column=2, sticky="w", padx=5)
 
-        tk.Button(frame, text="Durchsuchen", command=browse_file, width=12).grid(row=0, column=2, padx=5, pady=5)
+        # Row 2: Page ranges grouped in sub-frame
+        tk.Label(row_frame, text="Pages:", bg="#f5f5f5").grid(row=2, column=0, sticky="w", padx=5, pady=2)
+        page_frame = tk.Frame(row_frame, bg="#f5f5f5")
+        page_frame.grid(row=2, column=1, sticky="w", padx=5)
+        tk.Entry(page_frame, textvariable=s_var, width=5).pack(side="left")
+        tk.Label(page_frame, text=" to ", bg="#f5f5f5").pack(side="left")
+        tk.Entry(page_frame, textvariable=e_var, width=5).pack(side="left")
 
-        tk.Label(frame, text="Stimme:", bg="#f5f5f5").grid(row=1, column=0, padx=5, pady=5, sticky="w")
-        voice_var = tk.StringVar(value=list(self.voices.keys())[0] if self.voices else "")
-        voice_dropdown = ttk.Combobox(frame, textvariable=voice_var, values=list(self.voices.keys()), state="readonly", width=30)
-        voice_dropdown.grid(row=1, column=1, padx=5, pady=5)
+        # Global Remove Button
+        def remove_row():
+            self.voice_comboboxes.remove(cb)
+            row_frame.destroy()
 
-        tk.Label(frame, text="Startseite:", bg="#f5f5f5").grid(row=2, column=0, padx=5, pady=5, sticky="w")
-        start_entry = tk.Entry(frame, width=10)
-        start_entry.grid(row=2, column=1, padx=5, pady=5, sticky="w")
-        tk.Label(frame, text="Endseite:", bg="#f5f5f5").grid(row=3, column=0, padx=5, pady=5, sticky="w")
-        end_entry = tk.Entry(frame, width=10)
-        end_entry.grid(row=3, column=1, padx=5, pady=5, sticky="w")
+        row_frame.columnconfigure(3, weight=1)
+        tk.Button(row_frame, text="Remove", fg="red", command=remove_row).grid(row=0, column=3, rowspan=3, sticky="e", padx=15)
 
-        def confirm():
-            file_path = file_path_var.get().strip()
-            voice_name = voice_var.get().strip()
-            if not file_path or not os.path.exists(file_path):
-                messagebox.showerror("Fehler", "Bitte gültige PDF-Datei auswählen!")
-                return
-            if voice_name not in self.voices.keys():
-                messagebox.showerror("Fehler", f"Stimme '{voice_name}' ungültig!")
-                return
-            try:
-                start = int(start_entry.get())
-                end = int(end_entry.get())
-            except ValueError:
-                messagebox.showerror("Fehler", "Start- und Endseite müssen Zahlen sein!")
-                return
-            try:
-                self.voices[voice_name].add_pages(file_path, start, end)
-            except ValueError as e:
-                messagebox.showerror("Fehler", str(e))
-                return
+        row_frame.state_vars = {"file": f_var, "voice": v_var, "start": s_var, "end": e_var}
+        
+        # Apply global scrolling logic to this new row
+        self.bind_all_children(row_frame, canvas)
 
-            tab_index = self.notebook.index(self.notebook.select())
-            self.symphonies[tab_index].append({
-                "file": file_path,
-                "voice_name": voice_name,
-                "start_page": start,
-                "end_page": end
-            })
-
-            for widget in frame.winfo_children():
-                widget.grid_remove()
-            added_label = tk.Label(frame, text=f"{voice_name}: Hinzugefügt!", fg="green", bg="#f5f5f5")
-            added_label.grid(row=0, column=0, columnspan=3)
-
-        end_entry.bind("<Return>", lambda event: confirm())
-        tk.Button(frame, text="Hinzufügen", command=confirm, width=12).grid(row=4, column=1, pady=5)
-
-    # ----------------------------
-    # Tab Features
-    # ----------------------------
     def rename_tab(self, event):
-        index = self.notebook.index("@%d,%d" % (event.x, event.y))
-        if index >= len(self.symphonies):
-            return
-        old_name = self.notebook.tab(index, "text")
+        """Allows inline renaming of symphony tabs."""
+        idx = self.notebook.index(f"@{event.x},{event.y}")
+        old_name = self.notebook.tab(idx, "text")
+        if old_name == "+": return
+        
         entry = tk.Entry(self.notebook, width=20)
         entry.insert(0, old_name)
-        entry.place(x=event.x_root - self.master.winfo_rootx(),
-                    y=event.y_root - self.master.winfo_rooty())
+        entry.place(x=event.x, y=event.y)
         entry.focus_set()
 
-        def save_name(event=None):
-            new_name = entry.get().strip()
-            if new_name:
-                self.notebook.tab(index, text=new_name)
+        def save(e=None):
+            if entry.get().strip():
+                self.notebook.tab(idx, text=entry.get().strip())
             entry.destroy()
-
-        entry.bind("<Return>", save_name)
-        entry.bind("<FocusOut>", save_name)
+        
+        entry.bind("<Return>", save)
+        entry.bind("<FocusOut>", save)
 
     def rightclick_tab(self, event):
-        index = self.notebook.index("@%d,%d" % (event.x, event.y))
-        if index >= len(self.symphonies):
-            return
+        """Opens context menu to close a tab."""
+        idx = self.notebook.index(f"@{event.x},{event.y}")
+        if self.notebook.tab(idx, "text") == "+": return
         menu = tk.Menu(self.master, tearoff=0)
-        menu.add_command(label="Tab schließen", command=lambda idx=index: self.close_tab(idx))
+        menu.add_command(label="Close Tab", command=lambda: self.close_tab(idx))
         menu.tk_popup(event.x_root, event.y_root)
 
     def close_tab(self, index):
+        """Removes a tab and its associated data structures."""
+        tab_widget_name = self.notebook.tabs()[index]
+        tab_widget = self.master.nametowidget(tab_widget_name)
+        
+        for sf in self.symphony_frames:
+            if str(sf).startswith(str(tab_widget)):
+                self.symphony_frames.remove(sf)
+                break
         self.notebook.forget(index)
-        del self.symphonies[index]
-        del self.tabs[index]
-        # Indizes aktualisieren
-        self.tabs = {i: self.tabs.get(i if i<index else i+1) for i in range(len(self.symphonies))}
 
-    # ----------------------------
-    # Export
-    # ----------------------------
+    def load_from_json(self):
+        """Populates the UI based on an external JSON configuration."""
+        path = filedialog.askopenfilename(filetypes=[("JSON Files", "*.json")])
+        if not path: return
+        
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        self.title_entry.delete(0, tk.END)
+        self.title_entry.insert(0, data.get("metadata", {}).get("suite_title", ""))
+        self.composer_entry.delete(0, tk.END)
+        self.composer_entry.insert(0, data.get("metadata", {}).get("composer", ""))
+
+        while self.notebook.index("end") > 1:
+            self.notebook.forget(0)
+        self.symphony_frames.clear()
+        self.voice_comboboxes.clear()
+        self.voices.clear()
+
+        symphonies = data.get("symphonies", [])
+        for i, symph in enumerate(symphonies):
+            self.add_symphony_tab(f"Symphony {i+1}")
+            current_sf = self.symphony_frames[-1]
+            canvas = current_sf.master
+            
+            for entry in symph:
+                v_name = entry["voice_name"]
+                if v_name not in self.voices:
+                    self.voices[v_name] = True
+                self.add_file_row(current_sf, canvas, data=entry)
+        
+        self.update_comboboxes()
+
     def export_all(self):
-        data = {
-            "metadata": {"suite_title": self.suite_title, "composer": self.composer},
-            "symphonies": self.symphonies
-        }
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=4, ensure_ascii=False)
-        for voice in self.voices.values():
-            voice.export_pdf(self.suite_title, self.composer)
-        messagebox.showinfo("Fertig", "Alle Stimmen exportiert!")
+        """Parses the current UI state, creates JSON, and triggers PDF processing."""
+        title = self.title_entry.get().strip()
+        composer = self.composer_entry.get().strip()
+        if not title or not composer:
+            messagebox.showerror("Error", "Title and composer are required.")
+            return
 
-# ----------------------------
-# Main
-# ----------------------------
+        export_data = {"metadata": {"suite_title": title, "composer": composer}, "symphonies": []}
+        active_voices = {}
+
+        for sf in self.symphony_frames:
+            symphony_data = []
+            for row in sf.winfo_children():
+                if hasattr(row, "state_vars"):
+                    f_val = row.state_vars["file"].get()
+                    v_val = row.state_vars["voice"].get()
+                    try:
+                        s_val = int(row.state_vars["start"].get())
+                        e_val = int(row.state_vars["end"].get())
+                    except ValueError:
+                        messagebox.showerror("Error", "Page numbers must be integers.")
+                        return
+                    
+                    if not f_val or not os.path.exists(f_val):
+                        messagebox.showerror("Error", f"Invalid file path: {f_val}")
+                        return
+
+                    symphony_data.append({
+                        "file": f_val, "voice_name": v_val,
+                        "start_page": s_val, "end_page": e_val
+                    })
+                    
+                    if v_val not in active_voices:
+                        active_voices[v_val] = Voice(v_val)
+                    
+                    try:
+                        active_voices[v_val].add_pages(f_val, s_val, e_val)
+                    except Exception as e:
+                        messagebox.showerror("Processing Error", str(e))
+                        return
+            
+            export_data["symphonies"].append(symphony_data)
+
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(export_data, f, indent=4)
+
+        for voice_obj in active_voices.values():
+            voice_obj.export_pdf(title, composer)
+            
+        messagebox.showinfo("Success", "Files successfully exported and JSON updated.")
+
 if __name__ == "__main__":
     if USE_GUI:
         root = tk.Tk()
         gui = ScoreGUI(root)
-        tk.Button(root, text="Alle exportieren", width=20, command=gui.export_all).pack(pady=5)
+        tk.Button(root, text="Export All", width=20, bg="#d0e0ff", command=gui.export_all).pack(pady=10)
         root.mainloop()
-    else:
-        if not os.path.exists(CONFIG_FILE):
-            raise FileNotFoundError(f"{CONFIG_FILE} nicht gefunden!")
-        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        metadata = data["metadata"]
-        symphonies = data["symphonies"]
-
-        voices = {}
-        for symphony in symphonies:
-            for entry in symphony:
-                name = entry["voice_name"]
-                if name not in voices:
-                    voices[name] = Voice(name)
-                voices[name].add_pages(entry["file"], entry["start_page"], entry["end_page"])
-
-        for voice in voices.values():
-            voice.export_pdf(metadata["suite_title"], metadata["composer"])
