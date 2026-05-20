@@ -7,8 +7,6 @@ from tkinter import filedialog, ttk, messagebox
 from pypdf import PdfReader, PdfWriter
 
 # Global configuration
-USE_GUI = True
-CONFIG_FILE = "Brahms_config.json"
 OUTPUT_FOLDER = "output"
 
 class Voice:
@@ -44,7 +42,6 @@ class ScoreGUI:
         self.master = master
         self.master.title("Score Assembler")
         
-        # Enforce initial and minimum dimensions to ensure layout visibility
         self.master.geometry("1000x700")
         self.master.minsize(850, 500)
         
@@ -150,7 +147,7 @@ class ScoreGUI:
         """Detects selection of the '+' tab to spawn a new symphony."""
         current = self.notebook.select()
         if not current: 
-            return # Guard against empty selection states during tab switches
+            return
         try:
             if self.notebook.tab(current, "text") == "+":
                 self.add_symphony_tab()
@@ -165,7 +162,7 @@ class ScoreGUI:
             cb['values'] = voice_list
 
     def add_file_row(self, parent_frame, canvas, data=None):
-        """Appends an editable row for PDF assignment with inline addition and reliable layout."""
+        """Appends an editable row, handles inline context, and auto-focuses the viewport."""
         row_frame = tk.Frame(parent_frame, relief=tk.RIDGE, borderwidth=2, bg="#f5f5f5")
         row_frame.pack(padx=5, pady=5, fill="x")
 
@@ -174,7 +171,6 @@ class ScoreGUI:
         s_var = tk.StringVar(value=str(data["start_page"]) if data else "")
         e_var = tk.StringVar(value=str(data["end_page"]) if data else "")
 
-        # File Input Row
         tk.Label(row_frame, text="File:", bg="#f5f5f5").grid(row=0, column=0, sticky="w", padx=5, pady=2)
         tk.Entry(row_frame, textvariable=f_var, width=40).grid(row=0, column=1, sticky="w", padx=5)
         
@@ -195,7 +191,6 @@ class ScoreGUI:
 
         tk.Button(row_frame, text="Browse", command=browse).grid(row=0, column=2, sticky="w", padx=5)
 
-        # Voice Selection Row
         tk.Label(row_frame, text="Voice:", bg="#f5f5f5").grid(row=1, column=0, sticky="w", padx=5, pady=2)
         cb = ttk.Combobox(row_frame, textvariable=v_var, values=list(self.voices.keys()), state="readonly", width=37)
         cb.grid(row=1, column=1, sticky="w", padx=5)
@@ -230,7 +225,6 @@ class ScoreGUI:
 
         tk.Button(row_frame, text="Add", command=open_inline_voice_dialog).grid(row=1, column=2, sticky="w", padx=5)
 
-        # Page Ranges Row
         tk.Label(row_frame, text="Pages:", bg="#f5f5f5").grid(row=2, column=0, sticky="w", padx=5, pady=2)
         page_frame = tk.Frame(row_frame, bg="#f5f5f5")
         page_frame.grid(row=2, column=1, sticky="w", padx=5)
@@ -238,7 +232,6 @@ class ScoreGUI:
         tk.Label(page_frame, text=" to ", bg="#f5f5f5").pack(side="left")
         tk.Entry(page_frame, textvariable=e_var, width=5).pack(side="left")
 
-        # Global Remove Button
         def remove_row():
             self.voice_comboboxes.remove(cb)
             row_frame.destroy()
@@ -249,6 +242,9 @@ class ScoreGUI:
         row_frame.state_vars = {"file": f_var, "voice": v_var, "start": s_var, "end": e_var}
         
         self.bind_all_children(row_frame, canvas)
+
+        parent_frame.update_idletasks()
+        canvas.yview_moveto(1.0)
 
     def rename_tab(self, event):
         """Allows inline renaming of symphony tabs."""
@@ -284,17 +280,15 @@ class ScoreGUI:
         except tk.TclError:
             current_selected = -1
 
-        # Redirect focus if the active tab is being closed
         if current_selected == index:
             if index > 0:
                 self.notebook.select(index - 1)
-            elif len(self.notebook.tabs()) > 2:  # Safe fallback if more tabs exist
+            elif len(self.notebook.tabs()) > 2:
                 self.notebook.select(index + 1)
 
         tab_widget_name = self.notebook.tabs()[index]
         tab_widget = self.master.nametowidget(tab_widget_name)
         
-        # Purge active combobox trackers belonging to this frame
         self.voice_comboboxes = [cb for cb in self.voice_comboboxes if not str(cb).startswith(str(tab_widget))]
         
         for sf in self.symphony_frames:
@@ -303,9 +297,10 @@ class ScoreGUI:
                 break
                 
         self.notebook.forget(index)
+        tab_widget.destroy()
 
     def load_from_json(self):
-        """Populates the UI based on an external JSON configuration."""
+        """Populates the UI based on an external JSON configuration, ensuring complete state reset."""
         path = filedialog.askopenfilename(filetypes=[("JSON Files", "*.json")])
         if not path: return
         
@@ -317,8 +312,12 @@ class ScoreGUI:
         self.composer_entry.delete(0, tk.END)
         self.composer_entry.insert(0, data.get("metadata", {}).get("composer", ""))
 
-        while self.notebook.index("end") > 1:
-            self.notebook.forget(0)
+        num_tabs = self.notebook.index("end")
+        for i in range(num_tabs - 2, -1, -1):
+            tab_widget = self.master.nametowidget(self.notebook.tabs()[i])
+            self.notebook.forget(i)
+            tab_widget.destroy()
+
         self.symphony_frames.clear()
         self.voice_comboboxes.clear()
         self.voices.clear()
@@ -338,7 +337,7 @@ class ScoreGUI:
         self.update_comboboxes()
 
     def export_all(self):
-        """Parses the current UI state, creates JSON, and triggers PDF processing."""
+        """Parses the current UI state, creates dynamic JSON config, and triggers PDF processing."""
         title = self.title_entry.get().strip()
         composer = self.composer_entry.get().strip()
         if not title or not composer:
@@ -381,17 +380,18 @@ class ScoreGUI:
             
             export_data["symphonies"].append(symphony_data)
 
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        # Dynamic configuration filename generation
+        config_filename = f"{title.replace(' ', '_')}_config.json"
+        with open(config_filename, "w", encoding="utf-8") as f:
             json.dump(export_data, f, indent=4)
 
         for voice_obj in active_voices.values():
             voice_obj.export_pdf(title, composer)
             
-        messagebox.showinfo("Success", "Files successfully exported and JSON updated.")
+        messagebox.showinfo("Success", f"Files successfully exported and {config_filename} created.")
 
 if __name__ == "__main__":
-    if USE_GUI:
-        root = tk.Tk()
-        gui = ScoreGUI(root)
-        tk.Button(root, text="Export All", width=20, bg="#d0e0ff", command=gui.export_all).pack(pady=10)
-        root.mainloop()
+    root = tk.Tk()
+    gui = ScoreGUI(root)
+    tk.Button(root, text="Export All", width=20, bg="#d0e0ff", command=gui.export_all).pack(pady=10)
+    root.mainloop()
