@@ -44,7 +44,7 @@ class ScoreGUI:
         self.master = master
         self.master.title("Score Assembler")
         
-        # Enforce initial and minimum window dimensions to prevent widget clipping
+        # Enforce initial and minimum dimensions to ensure layout visibility
         self.master.geometry("1000x700")
         self.master.minsize(850, 500)
         
@@ -149,9 +149,14 @@ class ScoreGUI:
     def handle_tab_change(self, event):
         """Detects selection of the '+' tab to spawn a new symphony."""
         current = self.notebook.select()
-        if self.notebook.tab(current, "text") == "+":
-            self.add_symphony_tab()
-            self.notebook.select(self.notebook.index("end")-2)
+        if not current: 
+            return # Guard against empty selection states during tab switches
+        try:
+            if self.notebook.tab(current, "text") == "+":
+                self.add_symphony_tab()
+                self.notebook.select(self.notebook.index("end")-2)
+        except tk.TclError:
+            return
 
     def update_comboboxes(self):
         """Refreshes all dropdowns to include newly added voices."""
@@ -273,14 +278,30 @@ class ScoreGUI:
         menu.tk_popup(event.x_root, event.y_root)
 
     def close_tab(self, index):
-        """Removes a tab and its associated data structures."""
+        """Removes a tab and its associated data structures cleanly."""
+        try:
+            current_selected = self.notebook.index(self.notebook.select())
+        except tk.TclError:
+            current_selected = -1
+
+        # Redirect focus if the active tab is being closed
+        if current_selected == index:
+            if index > 0:
+                self.notebook.select(index - 1)
+            elif len(self.notebook.tabs()) > 2:  # Safe fallback if more tabs exist
+                self.notebook.select(index + 1)
+
         tab_widget_name = self.notebook.tabs()[index]
         tab_widget = self.master.nametowidget(tab_widget_name)
+        
+        # Purge active combobox trackers belonging to this frame
+        self.voice_comboboxes = [cb for cb in self.voice_comboboxes if not str(cb).startswith(str(tab_widget))]
         
         for sf in self.symphony_frames:
             if str(sf).startswith(str(tab_widget)):
                 self.symphony_frames.remove(sf)
                 break
+                
         self.notebook.forget(index)
 
     def load_from_json(self):
