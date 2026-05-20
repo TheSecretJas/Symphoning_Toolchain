@@ -38,28 +38,20 @@ Dieses Tool dient der Extraktion spezifischer Seitenbereiche aus umfassenden PDF
 
 ### Bedienung
 
-#### Option A: Interaktiver Modus (GUI)
-1. Setze im Skript `USE_GUI = True`.
-2. Starte das Skript: 
+#### Interaktiver Modus
+1. Starte das Skript oder die .exe: 
    ```bash
    python Sinfonie_Generator.py
    ```
-3. **Metadaten:** Trage Titel der Suite und Komponist ein.
-4. **Stimmen definieren:** Klicke auf "Stimmgruppe hinzufügen" und lege die benötigten Instrumente an.
-5. **Dateien zuweisen:** - Füge über "Datei hinzufügen" eine Quell-PDF hinzu.
-   - Wähle die Stimme aus dem Dropdown-Menü.
-   - Trage die exakten Start- und Endseiten ein und bestätige mit Enter oder "Hinzufügen".
-6. **Sätze trennen:** Nutze das "+"-Tab, um weitere Sätze oder Stücke strukturiert hinzuzufügen.
-7. Klicke auf "Alle exportieren", um die PDFs im Ordner `output/` zu erstellen und die Konfiguration zu speichern.
+2. **Metadaten:** Trage Titel der Suite und Komponist ein.
+3. **Bekannte Konfiguration bearbeiten (Optional):** Öffne eine .json einer vorherigen Konfiguration, um diese zu bearbeiten.
+4. **Dateien zuweisen:** - Füge über "Datei hinzufügen" eine Quell-PDF hinzu.
+   - Wähle die Stimme aus dem Dropdown-Menü oder füge ggf. eine hinzu.
+   - Trage die exakten Start- und Endseiten ein.
+5. **Sätze trennen:** Nutze das "+"-Tab, um weitere Sätze oder Stücke strukturiert hinzuzufügen.
+   - Zu viel hinzugefügte Sätze können über einen Rechtsklick auf den Satz und "close tab" wieder geschlossen werden. 
+6. Klicke auf "Alle exportieren", um die PDFs im Ordner `output/` zu erstellen und die Konfiguration zu speichern.
 
-#### Option B: Automatisierter Modus (Headless)
-1. Setze im Skript `USE_GUI = False`.
-2. Stelle sicher, dass die Datei `Brahms_config.json` im selben Verzeichnis liegt und korrekt formatiert ist.
-3. Führe das Skript aus:
-   ```bash
-   python Sinfonie_Generator.py
-   ```
-   Das Skript liest die JSON-Datei ein und generiert die PDFs direkt im Ordner `output/`.
 
 ### Known Issues ###
 Aktuell kann in der UI nach der Eingabe nicht mehr bearbeitet werden, Fehler können erst nach Abschluss ausgebessert werden. Ist aber in Planung
