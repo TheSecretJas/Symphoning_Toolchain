@@ -1,0 +1,70 @@
+# ==============================================================
+# FILENAME: release.yml
+# PROJECT : Symphoning_Toolchain
+# AUTHOR  : Jonas Thern
+# NOTE    : Kommentare und Formatierung wurden mit Unterstuetzung
+#           von kuenstlicher Intelligenz (Claude, Anthropic) erstellt.
+# ==============================================================
+#
+# Baut bei jedem Tag im Format v* (z.B. v1.0.0) die Windows-
+# Executables beider Skripte mit PyInstaller und veroeffentlicht
+# sie als Assets in einem neuen GitHub-Release.
+#
+# Ausloesen:
+#   git tag v1.0.0
+#   git push origin v1.0.0
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  EXPORTER_SRC: Exporter_Drucken/Exporter_Drucken.py
+  SINFONIE_SRC: Sinfonie_Generator/Sinfonie_Generator.py
+
+jobs:
+  build-windows:
+    name: Windows-Executables bauen und veroeffentlichen
+    runs-on: windows-latest
+
+    steps:
+      - name: Repository auschecken
+        uses: actions/checkout@v4
+
+      - name: Python einrichten
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Abhaengigkeiten installieren
+        run: |
+          python -m pip install --upgrade pip
+          pip install pypdf pyinstaller
+
+      - name: Exporter bauen (Konsolenanwendung)
+        run: >
+          pyinstaller --onefile --console
+          --name Exporter_Drucken
+          "${{ env.EXPORTER_SRC }}"
+
+      - name: Sinfonie-Generator bauen (Fensteranwendung)
+        run: >
+          pyinstaller --onefile --windowed
+          --name Sinfonie_Generator
+          "${{ env.SINFONIE_SRC }}"
+
+      - name: Release erstellen und Executables anhaengen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "${{ github.ref_name }}"
+          dist/Exporter_Drucken.exe
+          dist/Sinfonie_Generator.exe
+          --title "${{ github.ref_name }}"
+          --generate-notes
