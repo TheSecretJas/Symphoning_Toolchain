@@ -1,0 +1,49 @@
+# ==============================================================
+# FILENAME: build-check.yml
+# PROJECT : Symphoning_Toolchain
+# AUTHOR  : Jonas Thern
+# NOTE    : Kommentare und Formatierung wurden mit Unterstuetzung
+#           von kuenstlicher Intelligenz (Claude, Anthropic) erstellt.
+# ==============================================================
+#
+# Prueft bei jedem Push und Pull Request auf main, ob der Code
+# fehlerfrei kompiliert und keine echten Syntax- oder Namensfehler
+# enthaelt. Reine Stilfehler werden bewusst nicht geprueft.
+
+name: Build Check
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+ 
+jobs:
+  syntax-check:
+    name: Syntax- und Kompilierpruefung
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [ "3.11", "3.12" ]
+ 
+    steps:
+      - name: Repository auschecken
+        uses: actions/checkout@v4
+ 
+      - name: Python einrichten
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+ 
+      - name: Ruff installieren
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff
+ 
+      - name: Kompilierpruefung
+        run: python -m compileall -q .
+ 
+      - name: Fehlerpruefung 
+        run: ruff check --select E9,F63,F7,F82 .
+ 
