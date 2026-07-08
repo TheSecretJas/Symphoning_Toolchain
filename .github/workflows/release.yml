@@ -25,8 +25,8 @@ permissions:
   contents: write
 
 env:
-  EXPORTER_SRC: Exporter_Drucken/Exporter_Drucken.py
-  SINFONIE_SRC: Sinfonie_Generator/Sinfonie_Generator.py
+  EXPORTER_SRC: Exporter_Drucken.py
+  SINFONIE_SRC: Sinfonie_Generator.py
 
 jobs:
   build-windows:
