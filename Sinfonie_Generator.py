@@ -104,8 +104,10 @@ class ScoreGUI:
                   command=self.save_json).pack(side="left", padx=5)
 
         self.open_pdf_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(frame, text="PDF nach Auswahl öffnen", bg="#f9f9f9",
-                       variable=self.open_pdf_var).grid(row=2, column=1, sticky="e")
+        # Im Button-Frame neben den Knoepfen, sonst ueberdeckt die Checkbox
+        # den Speichern-Knopf (gleiche Grid-Zelle)
+        tk.Checkbutton(btn_frame, text="PDF nach Auswahl öffnen", bg="#f9f9f9",
+                       variable=self.open_pdf_var).pack(side="left", padx=(20, 0))
 
     def setup_notebook_ui(self):
         """Tab-Ansicht fuer die einzelnen Sinfonien."""

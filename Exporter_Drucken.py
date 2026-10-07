@@ -35,6 +35,11 @@ SCALE_DEFAULT = 100
 SCALE_MIN = 50
 SCALE_MAX = 200
 
+# Spaltenbreiten der Tabelle in Pixeln (Kopfzeile und Zeilen identisch,
+# damit die Ueberschriften unabhaengig von der Schrift buendig sind)
+COLUMNS = (("Stimme", 190, "w"), ("Seiten", 60, "e"), ("Kopien", 90, "e"),
+           ("Gesamt", 70, "e"), ("Skalierung %", 120, "e"))
+
 
 def get_copy_count(voice_name):
     """Ermittelt die Standard-Kopienzahl anhand des Stimmennamens."""
@@ -201,10 +206,10 @@ class ExporterGUI:
     def setup_table_ui(self):
         header = ttk.Frame(self.master, padding=(10, 4))
         header.pack(fill="x")
-        for text, width in (("Stimme", 24), ("Seiten", 8), ("Kopien", 8), ("Gesamt", 10),
-                            ("Skalierung %", 12)):
-            ttk.Label(header, text=text, width=width,
-                      font=("TkDefaultFont", 9, "bold")).pack(side="left", padx=4)
+        self._configure_columns(header)
+        for col, (text, _, anchor) in enumerate(COLUMNS):
+            ttk.Label(header, text=text, font=("TkDefaultFont", 9, "bold")).grid(
+                row=0, column=col, sticky=anchor, padx=4)
 
         container = ttk.Frame(self.master, padding=(10, 0))
         container.pack(fill="both", expand=True)
@@ -240,6 +245,11 @@ class ExporterGUI:
 
         self.log_text = tk.Text(self.master, height=6, state="disabled")
         self.log_text.pack(fill="x", padx=10, pady=(0, 10))
+
+    @staticmethod
+    def _configure_columns(frame):
+        for col, (_, width, _) in enumerate(COLUMNS):
+            frame.columnconfigure(col, minsize=width)
 
     def _on_mousewheel(self, event):
         if self.canvas.winfo_ismapped():
@@ -363,25 +373,26 @@ class ExporterGUI:
         """Fuegt eine Tabellenzeile mit editierbarer Kopienzahl hinzu."""
         row = ttk.Frame(self.table_frame)
         row.pack(fill="x", pady=1)
+        self._configure_columns(row)
 
-        ttk.Label(row, text=name, width=24).pack(side="left", padx=4)
-        ttk.Label(row, text=str(pages), width=8, anchor="e").pack(side="left", padx=4)
+        ttk.Label(row, text=name).grid(row=0, column=0, sticky="w", padx=4)
+        ttk.Label(row, text=str(pages)).grid(row=0, column=1, sticky="e", padx=4)
 
         copies_var = tk.StringVar(value=str(default_copies))
         ttk.Spinbox(row, from_=0, to=99, textvariable=copies_var,
-                    width=6).pack(side="left", padx=4)
+                    width=5).grid(row=0, column=2, sticky="e", padx=4)
 
-        total_label = ttk.Label(row, text=str(pages * default_copies), width=10, anchor="e")
-        total_label.pack(side="left", padx=4)
+        total_label = ttk.Label(row, text=str(pages * default_copies))
+        total_label.grid(row=0, column=3, sticky="e", padx=4)
 
         scale_var = None
         if scalable:
             scale_var = tk.StringVar(value=str(SCALE_DEFAULT))
             ttk.Spinbox(row, from_=SCALE_MIN, to=SCALE_MAX, increment=1,
-                        textvariable=scale_var, width=6).pack(side="left", padx=(20, 4))
+                        textvariable=scale_var, width=5).grid(
+                row=0, column=4, sticky="e", padx=4)
         else:
-            ttk.Label(row, text="–", width=8, anchor="center").pack(
-                side="left", padx=(20, 4))
+            ttk.Label(row, text="–").grid(row=0, column=4, sticky="e", padx=4)
 
         self.rows.append((name, pages, copies_var, total_label, scale_var))
         copies_var.trace_add("write", lambda *args: self.update_total())
