@@ -14,6 +14,7 @@ Dieses Tool führt Einzelstimmen aus verschiedenen Werken über eine grafische O
   - `StückA_Violine_1.pdf` (Zahl als eigenes Segment)
 - **Partitur-Handling:** Dateien mit dem Suffix `Partitur` werden nicht zusammengeführt, sondern direkt als Kopie in den Ausgabeordner übertragen.
 - **Druckkontingent-Berechnung:** Die vordefinierte Matrix (10x Violine 1, 9x Violine 2, 4x Viola, 8x Cello, 2x Bass) dient als Vorbelegung. Geteilte Bläserstimmen (z.B. mit der Endung `12` wie `Trompete12`) erhalten automatisch 2 Kopien, Standardstimmen 1 Kopie. Alle Kopienzahlen lassen sich vor dem Export direkt in der Tabelle anpassen — das Gesamtdruckvolumen aktualisiert sich live.
+- **Skalierung pro Stimme:** In der Spalte *Skalierung %* (50–200 %, Standard 100 %) lässt sich jede Stimme beim Export vergrößern oder verkleinern. Der Inhalt wird um die Seitenmitte skaliert, die Seitengröße bleibt gleich – anders als im Browser-Druckdialog verschiebt sich nichts nach rechts. Bei Vergrößerung werden die Ränder gleichmäßig beschnitten. Partituren bleiben unverändert.
 - **Reaktionsfähige Oberfläche:** Einlesen und Export laufen in einem Hintergrund-Thread mit Status- und Fortschrittsanzeige, die Oberfläche friert dabei nicht ein.
 
 ### Bedienung
@@ -27,6 +28,7 @@ Dieses Tool führt Einzelstimmen aus verschiedenen Werken über eine grafische O
 3. **Ablauf in der Oberfläche:**
    - Notenordner wählen und auf **Scannen** klicken.
    - In der Tabelle die vorbelegten Kopienzahlen prüfen und bei Bedarf anpassen.
+   - Optional: Stimmen, die zu klein gesetzt sind, über *Skalierung %* vergrößern (z. B. 106).
    - Auf **Exportieren** klicken.
 4. **Output:**
    - Im Ordner `Drucken/` befinden sich die gebündelten PDFs (z.B. `Viola.pdf`, die alle Viola-Seiten aller Stücke enthält).

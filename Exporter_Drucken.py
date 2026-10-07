@@ -19,7 +19,7 @@ import shutil
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
-from pypdf import PdfReader, PdfWriter
+from pypdf import PdfReader, PdfWriter, Transformation
 
 OUTPUT_FOLDER = "Drucken"
 
@@ -29,6 +29,11 @@ COPIES_VIOLINE2 = 9
 COPIES_VIOLA = 4
 COPIES_CELLO = 8
 COPIES_BASS = 2
+
+# Skalierung in Prozent (100 = unveraendert)
+SCALE_DEFAULT = 100
+SCALE_MIN = 50
+SCALE_MAX = 200
 
 
 def get_copy_count(voice_name):
@@ -74,6 +79,25 @@ def extract_voice_name(filename):
         voice = parts[-2] + voice
 
     return voice.replace(" ", "")
+
+
+def scale_page_centered(page, factor):
+    """Skaliert den Seiteninhalt um die Seitenmitte, Seitengroesse bleibt.
+
+    Anders als z. B. der Browser-Druckdialog, der von der linken unteren
+    Ecke aus skaliert, bleibt der Inhalt hier zentriert. Bei factor > 1
+    werden die Raender gleichmaessig beschnitten, bei factor < 1 entsteht
+    gleichmaessig mehr Rand.
+    """
+    if factor == 1:
+        return
+    box = page.cropbox  # sichtbarer Bereich (Standard: MediaBox)
+    cx = (float(box.left) + float(box.right)) / 2
+    cy = (float(box.bottom) + float(box.top)) / 2
+    # Punkt p -> factor * p + (1 - factor) * Mitte: die Mitte bleibt fix
+    page.add_transformation(
+        Transformation().scale(factor, factor)
+        .translate(cx * (1 - factor), cy * (1 - factor)))
 
 
 def collect_pdf_paths(base_folder):
@@ -132,12 +156,14 @@ class ExporterGUI:
     def __init__(self, master):
         self.master = master
         self.master.title("Druckexporter")
-        self.master.geometry("720x640")
+        self.master.geometry("800x640")
         self.master.minsize(600, 480)
 
         self.voices = {}
         self.scores = []
-        self.rows = []  # (Stimmenname, Seitenzahl, Kopien-Variable, Summen-Label)
+        # (Stimmenname, Seitenzahl, Kopien-Variable, Summen-Label,
+        #  Skalierungs-Variable oder None)
+        self.rows = []
         self.msg_queue = queue.Queue()
         self.worker = None
 
@@ -175,7 +201,8 @@ class ExporterGUI:
     def setup_table_ui(self):
         header = ttk.Frame(self.master, padding=(10, 4))
         header.pack(fill="x")
-        for text, width in (("Stimme", 24), ("Seiten", 8), ("Kopien", 8), ("Gesamt", 10)):
+        for text, width in (("Stimme", 24), ("Seiten", 8), ("Kopien", 8), ("Gesamt", 10),
+                            ("Skalierung %", 12)):
             ttk.Label(header, text=text, width=width,
                       font=("TkDefaultFont", 9, "bold")).pack(side="left", padx=4)
 
@@ -317,7 +344,8 @@ class ExporterGUI:
 
         if self.scores:
             score_pages = sum(p for _, _, p in self.scores)
-            self.add_row("Partitur (Summe)", score_pages, 1)
+            # Partituren werden unveraendert kopiert -> keine Skalierung
+            self.add_row("Partitur (Summe)", score_pages, 1, scalable=False)
 
         self.update_total()
         self.set_busy(False)
@@ -331,7 +359,7 @@ class ExporterGUI:
         else:
             self.status_var.set("Keine Stimmen gefunden.")
 
-    def add_row(self, name, pages, default_copies):
+    def add_row(self, name, pages, default_copies, scalable=True):
         """Fuegt eine Tabellenzeile mit editierbarer Kopienzahl hinzu."""
         row = ttk.Frame(self.table_frame)
         row.pack(fill="x", pady=1)
@@ -346,7 +374,16 @@ class ExporterGUI:
         total_label = ttk.Label(row, text=str(pages * default_copies), width=10, anchor="e")
         total_label.pack(side="left", padx=4)
 
-        self.rows.append((name, pages, copies_var, total_label))
+        scale_var = None
+        if scalable:
+            scale_var = tk.StringVar(value=str(SCALE_DEFAULT))
+            ttk.Spinbox(row, from_=SCALE_MIN, to=SCALE_MAX, increment=1,
+                        textvariable=scale_var, width=6).pack(side="left", padx=(20, 4))
+        else:
+            ttk.Label(row, text="–", width=8, anchor="center").pack(
+                side="left", padx=(20, 4))
+
+        self.rows.append((name, pages, copies_var, total_label, scale_var))
         copies_var.trace_add("write", lambda *args: self.update_total())
 
     def get_copies(self, copies_var):
@@ -355,9 +392,19 @@ class ExporterGUI:
         except ValueError:
             return 0
 
+    def get_scale(self, scale_var):
+        """Liest die Skalierung in Prozent, ungueltige Werte -> 100."""
+        if scale_var is None:
+            return SCALE_DEFAULT
+        try:
+            value = int(float(scale_var.get().replace(",", ".")))
+        except ValueError:
+            return SCALE_DEFAULT
+        return min(SCALE_MAX, max(SCALE_MIN, value))
+
     def update_total(self):
         grand_total = 0
-        for name, pages, copies_var, total_label in self.rows:
+        for name, pages, copies_var, total_label, _ in self.rows:
             total = pages * self.get_copies(copies_var)
             total_label.configure(text=str(total))
             grand_total += total
@@ -368,7 +415,9 @@ class ExporterGUI:
     # ------------------------------------------------------------
     def start_export(self):
         base = self.folder_var.get()
-        copies_by_row = [(name, pages, self.get_copies(var)) for name, pages, var, _ in self.rows]
+        copies_by_row = [(name, pages, self.get_copies(var), self.get_scale(scale_var))
+                         for name, pages, var, _, scale_var in self.rows]
+        scale_by_voice = {name: scale for name, _, _, scale in copies_by_row}
         voices = self.voices
         scores = self.scores
 
@@ -389,11 +438,13 @@ class ExporterGUI:
             for i, voice_name in enumerate(sorted(voices.keys()), start=1):
                 self.msg_queue.put(("status", f"Exportiere {voice_name} ({i}/{total_voices})"))
                 self.msg_queue.put(("progress", (i, total_voices)))
+                factor = scale_by_voice.get(voice_name, SCALE_DEFAULT) / 100
                 writer = PdfWriter()
                 for path, _ in voices[voice_name]:
                     try:
                         for page in PdfReader(path).pages:
-                            writer.add_page(page)
+                            added = writer.add_page(page)
+                            scale_page_centered(added, factor)
                     except Exception as e:
                         self.msg_queue.put(
                             ("log", f"Fehler beim Lesen von {os.path.basename(path)}: {e}"))
@@ -408,21 +459,23 @@ class ExporterGUI:
                     shutil.copy(full_path, out_path)
 
             # Druckuebersicht erstellen
-            report("=" * 65)
-            report(f"{'DRUCKÜBERSICHT':^65}")
-            report("=" * 65)
-            report(f"{'Stimme':<24} | {'Seiten':>8} | {'Anzahl':>8} | {'Gesamt':>10}")
-            report("-" * 65)
+            report("=" * 78)
+            report(f"{'DRUCKÜBERSICHT':^78}")
+            report("=" * 78)
+            report(f"{'Stimme':<24} | {'Seiten':>8} | {'Anzahl':>8} | {'Gesamt':>10}"
+                   f" | {'Skalierung':>10}")
+            report("-" * 78)
 
             grand_total = 0
-            for name, pages, copies in copies_by_row:
+            for name, pages, copies, scale in copies_by_row:
                 total = pages * copies
                 grand_total += total
-                report(f"{name:<24} | {pages:>8} | {copies:>8} | {total:>10}")
+                report(f"{name:<24} | {pages:>8} | {copies:>8} | {total:>10}"
+                       f" | {str(scale) + ' %':>10}")
 
-            report("=" * 65)
+            report("=" * 78)
             report(f"{'GESAMTDRUCKVOLUMEN (Seiten)':<47} | {grand_total:>10}")
-            report("=" * 65)
+            report("=" * 78)
 
             report_path = os.path.join(out_dir, "Druckuebersicht.txt")
             with open(report_path, "w", encoding="utf-8") as f:
