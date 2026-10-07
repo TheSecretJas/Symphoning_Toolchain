@@ -20,6 +20,7 @@ Dieses Tool führt Einzelstimmen aus verschiedenen Werken über eine grafische O
 - **Stimmen-Klassifizierung:** Die Stimme wird aus dem Dateinamen gelesen. Beide Namensvarianten werden erkannt und identisch einsortiert:
   - `StückA_Violine1.pdf` (Suffix nach dem letzten Unterstrich)
   - `StückA_Violine_1.pdf` (Zahl als eigenes Segment)
+  - Schreibweisen mit und ohne Umlaut sowie Groß-/Kleinschreibung werden zusammengefasst: `Floete1`, `Flöte1` und `flöte_1` landen in derselben Stimme (angezeigt wird die Variante mit Umlaut).
 - **Partitur-Handling:** Dateien mit dem Suffix `Partitur` werden nicht zusammengeführt, sondern direkt als Kopie in den Ausgabeordner übertragen.
 - **Druckkontingent-Berechnung:** Die vordefinierte Matrix (10x Violine 1, 9x Violine 2, 4x Viola, 8x Cello, 2x Bass) dient als Vorbelegung. Geteilte Bläserstimmen (z.B. mit der Endung `12` wie `Trompete12`) erhalten automatisch 2 Kopien, Standardstimmen 1 Kopie. Alle Kopienzahlen lassen sich vor dem Export direkt in der Tabelle anpassen — das Gesamtdruckvolumen aktualisiert sich live.
 - **Skalierung pro Stimme:** In der Spalte *Skalierung %* (50–200 %, Standard 100 %) lässt sich jede Stimme beim Export vergrößern oder verkleinern. Der Inhalt wird um die Seitenmitte skaliert, die Seitengröße bleibt gleich – anders als im Browser-Druckdialog verschiebt sich nichts nach rechts. Bei Vergrößerung werden die Ränder gleichmäßig beschnitten. Partituren bleiben unverändert.

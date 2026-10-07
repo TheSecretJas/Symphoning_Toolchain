@@ -19,6 +19,7 @@ import os
 import queue
 import shutil
 import threading
+import unicodedata
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from pypdf import PdfReader, PdfWriter, Transformation
@@ -101,7 +102,23 @@ def extract_voice_name(filename):
     if voice.isdigit() and len(parts) >= 3:
         voice = parts[-2] + voice
 
-    return voice.replace(" ", "")
+    # NFC: macOS/OneDrive liefern Umlaute teils zerlegt (o + Trema)
+    return unicodedata.normalize("NFC", voice.replace(" ", ""))
+
+
+# Umschreibungen, die als gleich gelten (Floete1 == Flöte1)
+UMLAUT_MAP = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"})
+
+
+def voice_key(voice_name):
+    """Vergleichsschluessel: Gross-/Kleinschreibung und Umlaut-Schreibweise egal."""
+    return voice_name.casefold().translate(UMLAUT_MAP)
+
+
+def display_name(variants):
+    """Waehlt den Anzeigenamen: bevorzugt die Schreibweise mit Umlaut."""
+    with_umlaut = [v for v in variants if any(c in "äöüßÄÖÜ" for c in v)]
+    return (with_umlaut or variants)[0]
 
 
 def scale_page_centered(page, factor):
@@ -375,7 +392,8 @@ def scan_pdfs(pdf_paths, progress):
         scores: Liste (Pfad, Dateiname, Seitenzahl) fuer Partituren
         errors: Liste von Fehlermeldungen
     """
-    voices = {}
+    grouped = {}   # Vergleichsschluessel -> Liste (Pfad, Seitenzahl)
+    variants = {}  # Vergleichsschluessel -> gefundene Schreibweisen
     scores = []
     errors = []
     total = len(pdf_paths)
@@ -390,11 +408,17 @@ def scan_pdfs(pdf_paths, progress):
             continue
 
         voice_name = extract_voice_name(file)
-        if voice_name == "Partitur":
+        key = voice_key(voice_name)
+        if key == "partitur":
             scores.append((full_path, file, page_count))
         else:
-            voices.setdefault(voice_name, []).append((full_path, page_count))
+            grouped.setdefault(key, []).append((full_path, page_count))
+            names = variants.setdefault(key, [])
+            if voice_name not in names:
+                names.append(voice_name)
 
+    # Unterschiedliche Schreibweisen (Floete1/Flöte1) zu einer Stimme zusammenfassen
+    voices = {display_name(variants[key]): pages for key, pages in grouped.items()}
     return voices, scores, errors
 
 
