@@ -13,6 +13,7 @@
 # - Zeile duplizieren (gleiche Datei, Folgeseiten vorbefuellt)
 # - Konfiguration jederzeit speicherbar, nicht erst beim Export
 # - PDF-Oeffnen nach Auswahl abschaltbar, Statusleiste
+# - Moderne Optik (Sun-Valley-Theme, heller/dunkler Modus, ui_theme.py)
 # ----------------------------------------------------------------
 
 import os
@@ -23,9 +24,9 @@ import tkinter as tk
 from tkinter import filedialog, ttk, messagebox
 from pypdf import PdfReader, PdfWriter
 
+from ui_theme import apply_theme, style_canvas
+
 OUTPUT_FOLDER = "output"
-COLOR_BG = "#f5f5f5"
-COLOR_ERROR = "#ffd6d6"
 
 
 class Voice:
@@ -65,8 +66,9 @@ class ScoreGUI:
     def __init__(self, master):
         self.master = master
         self.master.title("Sinfonie Generator")
-        self.master.geometry("900x650")
-        self.master.minsize(700, 400)
+        self.palette = apply_theme(self.master)
+        self.master.geometry("960x760")
+        self.master.minsize(820, 560)
 
         self.voices = {}
         self.symphony_frames = []
@@ -85,34 +87,49 @@ class ScoreGUI:
     # ------------------------------------------------------------
     def setup_metadata_ui(self):
         """Oberer Bereich mit Metadaten und Dateiaktionen."""
-        frame = tk.Frame(self.master, padx=10, pady=10, bg="#f9f9f9")
-        frame.pack(padx=10, pady=10, fill="x")
+        head = ttk.Frame(self.master, padding=(16, 14, 16, 4))
+        head.pack(fill="x")
+        ttk.Label(head, text="Sinfonie Generator", style="Title.TLabel").pack(anchor="w")
+        ttk.Label(head, text="Sätze aus mehreren Werken zu Stimmenheften zusammenstellen",
+                  style="Muted.TLabel", foreground=self.palette["muted"]).pack(anchor="w")
 
-        tk.Label(frame, text="Titel:", bg="#f9f9f9").grid(row=0, column=0, sticky="w")
-        self.title_entry = tk.Entry(frame, width=40)
-        self.title_entry.grid(row=0, column=1, padx=5, pady=5, sticky="w")
+        frame = ttk.LabelFrame(self.master, text="Werk", padding=(12, 8, 12, 10))
+        frame.pack(padx=16, pady=(10, 6), fill="x")
 
-        tk.Label(frame, text="Komponist:", bg="#f9f9f9").grid(row=1, column=0, sticky="w")
-        self.composer_entry = tk.Entry(frame, width=40)
-        self.composer_entry.grid(row=1, column=1, padx=5, pady=5, sticky="w")
+        ttk.Label(frame, text="Titel").grid(row=0, column=0, sticky="w")
+        self.title_entry = ttk.Entry(frame, width=40)
+        self.title_entry.grid(row=0, column=1, padx=8, pady=4, sticky="w")
 
-        btn_frame = tk.Frame(frame, bg="#f9f9f9")
+        ttk.Label(frame, text="Komponist").grid(row=1, column=0, sticky="w")
+        self.composer_entry = ttk.Entry(frame, width=40)
+        self.composer_entry.grid(row=1, column=1, padx=8, pady=4, sticky="w")
+
+        btn_frame = ttk.Frame(frame)
         btn_frame.grid(row=2, column=0, columnspan=2, pady=(10, 0), sticky="w")
-        tk.Button(btn_frame, text="Konfiguration laden", width=18,
-                  command=self.load_from_json).pack(side="left", padx=(0, 5))
-        tk.Button(btn_frame, text="Konfiguration speichern", width=20,
-                  command=self.save_json).pack(side="left", padx=5)
+        ttk.Button(btn_frame, text="Konfiguration laden",
+                   command=self.load_from_json).pack(side="left", padx=(0, 6))
+        ttk.Button(btn_frame, text="Konfiguration speichern",
+                   command=self.save_json).pack(side="left")
 
         self.open_pdf_var = tk.BooleanVar(value=True)
         # Im Button-Frame neben den Knoepfen, sonst ueberdeckt die Checkbox
         # den Speichern-Knopf (gleiche Grid-Zelle)
-        tk.Checkbutton(btn_frame, text="PDF nach Auswahl öffnen", bg="#f9f9f9",
-                       variable=self.open_pdf_var).pack(side="left", padx=(20, 0))
+        ttk.Checkbutton(btn_frame, text="PDF nach Auswahl öffnen",
+                        variable=self.open_pdf_var,
+                        style=self.switch_style()).pack(side="left", padx=(20, 0))
+
+    def switch_style(self):
+        """Schiebeschalter im Sun-Valley-Theme, sonst normale Checkbox."""
+        try:
+            ttk.Style(self.master).layout("Switch.TCheckbutton")
+            return "Switch.TCheckbutton"
+        except tk.TclError:
+            return "TCheckbutton"
 
     def setup_notebook_ui(self):
         """Tab-Ansicht fuer die einzelnen Sinfonien."""
         self.notebook = ttk.Notebook(self.master)
-        self.notebook.pack(fill="both", expand=True, padx=10, pady=5)
+        self.notebook.pack(fill="both", expand=True, padx=16, pady=6)
         self.add_symphony_tab()
         self.add_plus_tab()
         self.notebook.bind("<<NotebookTabChanged>>", self.handle_tab_change)
@@ -120,8 +137,11 @@ class ScoreGUI:
     def setup_status_ui(self):
         """Statusleiste am unteren Rand."""
         self.status_var = tk.StringVar(value="Bereit.")
-        tk.Label(self.master, textvariable=self.status_var, anchor="w",
-                 relief=tk.SUNKEN, bd=1).pack(side="bottom", fill="x")
+        bar = ttk.Frame(self.master, padding=(16, 4, 16, 8))
+        bar.pack(side="bottom", fill="x")
+        ttk.Separator(bar).pack(fill="x", pady=(0, 6))
+        ttk.Label(bar, textvariable=self.status_var, anchor="w", style="Muted.TLabel",
+                  foreground=self.palette["muted"]).pack(fill="x")
 
     def set_status(self, msg):
         self.status_var.set(msg)
@@ -158,7 +178,7 @@ class ScoreGUI:
         if tab_name is None:
             tab_name = f"Sinfonie {len(self.symphony_frames) + 1}"
 
-        tab_frame = tk.Frame(self.notebook, bg="#eaeaea")
+        tab_frame = ttk.Frame(self.notebook, padding=(6, 6, 6, 0))
         plus_idx = next((i for i in range(self.notebook.index("end"))
                          if self.notebook.tab(i, "text") == "+"), None)
         if plus_idx is not None:
@@ -166,31 +186,35 @@ class ScoreGUI:
         else:
             self.notebook.add(tab_frame, text=tab_name)
 
-        container = tk.Frame(tab_frame)
+        container = ttk.Frame(tab_frame)
         container.pack(fill="both", expand=True)
-        canvas = tk.Canvas(container, bg="#eaeaea")
-        scrollbar = tk.Scrollbar(container, orient="vertical", command=canvas.yview)
-        files_frame = tk.Frame(canvas, bg="#eaeaea")
+        canvas = tk.Canvas(container)
+        style_canvas(canvas, self.palette)
+        scrollbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
+        files_frame = ttk.Frame(canvas)
 
         files_frame.bind("<Configure>",
                          lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.create_window((0, 0), window=files_frame, anchor="nw")
+        window_id = canvas.create_window((0, 0), window=files_frame, anchor="nw")
+        # Zeilen auf volle Breite ziehen, damit die Karten buendig sind
+        canvas.bind("<Configure>",
+                    lambda e: canvas.itemconfigure(window_id, width=e.width), add="+")
         canvas.configure(yscrollcommand=scrollbar.set)
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
         self.bind_scroll(canvas, canvas)
 
-        btn_frame = tk.Frame(tab_frame, bg="#eaeaea")
-        btn_frame.pack(pady=5)
-        tk.Button(btn_frame, text="Datei hinzufügen", width=20,
-                  command=lambda: self.add_file_row(files_frame, canvas)).pack()
+        btn_frame = ttk.Frame(tab_frame)
+        btn_frame.pack(pady=8)
+        ttk.Button(btn_frame, text="+  Datei hinzufügen",
+                   command=lambda: self.add_file_row(files_frame, canvas)).pack()
 
         self.symphony_frames.append(files_frame)
 
     def add_plus_tab(self):
         """Fuegt den dauerhaften Plus-Tab zum Anlegen neuer Sinfonien hinzu."""
-        plus_frame = tk.Frame(self.notebook)
+        plus_frame = ttk.Frame(self.notebook)
         self.notebook.add(plus_frame, text="+")
 
     def handle_tab_change(self, event):
@@ -221,7 +245,7 @@ class ScoreGUI:
         if old_name == "+":
             return
 
-        entry = tk.Entry(self.notebook, width=20)
+        entry = ttk.Entry(self.notebook, width=20)
         entry.insert(0, old_name)
         entry.place(x=x, y=y)
         entry.focus_set()
@@ -296,8 +320,8 @@ class ScoreGUI:
     # ------------------------------------------------------------
     def add_file_row(self, parent_frame, canvas, data=None):
         """Fuegt eine editierbare Dateizeile hinzu."""
-        row_frame = tk.Frame(parent_frame, relief=tk.RIDGE, borderwidth=2, bg=COLOR_BG)
-        row_frame.pack(padx=5, pady=5, fill="x")
+        row_frame = ttk.LabelFrame(parent_frame, padding=(10, 6, 10, 8))
+        row_frame.pack(padx=4, pady=(4, 6), fill="x")
 
         f_var = tk.StringVar(value=data["file"] if data else "")
         v_var = tk.StringVar(value=data["voice_name"] if data else "")
@@ -306,9 +330,9 @@ class ScoreGUI:
         max_pages = tk.IntVar(value=0)
 
         # Zeile 1: Datei
-        tk.Label(row_frame, text="Datei:", bg=COLOR_BG).grid(
-            row=0, column=0, sticky="w", padx=5, pady=2)
-        tk.Entry(row_frame, textvariable=f_var, width=45).grid(
+        ttk.Label(row_frame, text="Datei").grid(
+            row=0, column=0, sticky="w", padx=5, pady=3)
+        ttk.Entry(row_frame, textvariable=f_var, width=45).grid(
             row=0, column=1, sticky="w", padx=5)
 
         def read_page_count(path, prefill):
@@ -342,12 +366,12 @@ class ScoreGUI:
                 except Exception as e:
                     messagebox.showerror("Fehler", f"PDF konnte nicht geöffnet werden:\n{e}")
 
-        tk.Button(row_frame, text="Durchsuchen", command=browse).grid(
+        ttk.Button(row_frame, text="Durchsuchen", command=browse).grid(
             row=0, column=2, sticky="w", padx=5)
 
         # Zeile 2: Stimme (direkt eintippbar oder aus Liste waehlen)
-        tk.Label(row_frame, text="Stimme:", bg=COLOR_BG).grid(
-            row=1, column=0, sticky="w", padx=5, pady=2)
+        ttk.Label(row_frame, text="Stimme").grid(
+            row=1, column=0, sticky="w", padx=5, pady=3)
         cb = ttk.Combobox(row_frame, textvariable=v_var,
                           values=sorted(self.voices.keys()), width=42)
         cb.grid(row=1, column=1, sticky="w", padx=5)
@@ -355,20 +379,21 @@ class ScoreGUI:
         cb.bind("<Return>", lambda e: self.register_voice(v_var.get()))
         cb.bind("<<ComboboxSelected>>", lambda e: None)
         self.voice_comboboxes.append(cb)
-        tk.Label(row_frame, text="(neue Stimme direkt eintippen)",
-                 bg=COLOR_BG, fg="#888888").grid(row=1, column=2, sticky="w", padx=5)
+        ttk.Label(row_frame, text="neue Stimme direkt eintippen", style="Muted.TLabel",
+                  foreground=self.palette["muted"]).grid(row=1, column=2, sticky="w", padx=5)
 
         # Zeile 3: Seitenbereich mit Live-Validierung
-        tk.Label(row_frame, text="Seiten:", bg=COLOR_BG).grid(
-            row=2, column=0, sticky="w", padx=5, pady=2)
-        page_frame = tk.Frame(row_frame, bg=COLOR_BG)
+        ttk.Label(row_frame, text="Seiten").grid(
+            row=2, column=0, sticky="w", padx=5, pady=3)
+        page_frame = ttk.Frame(row_frame)
         page_frame.grid(row=2, column=1, sticky="w", padx=5)
-        s_entry = tk.Entry(page_frame, textvariable=s_var, width=5)
+        s_entry = ttk.Entry(page_frame, textvariable=s_var, width=5)
         s_entry.pack(side="left")
-        tk.Label(page_frame, text=" bis ", bg=COLOR_BG).pack(side="left")
-        e_entry = tk.Entry(page_frame, textvariable=e_var, width=5)
+        ttk.Label(page_frame, text="bis").pack(side="left", padx=8)
+        e_entry = ttk.Entry(page_frame, textvariable=e_var, width=5)
         e_entry.pack(side="left")
-        pages_label = tk.Label(page_frame, text="", bg=COLOR_BG, fg="#888888")
+        pages_label = ttk.Label(page_frame, text="", style="Muted.TLabel",
+                                foreground=self.palette["muted"])
         pages_label.pack(side="left", padx=8)
 
         def validate_pages(*args):
@@ -380,9 +405,10 @@ class ScoreGUI:
                 valid = 1 <= s_val <= e_val and (limit == 0 or e_val <= limit)
             except ValueError:
                 valid = not s_var.get().strip() and not e_var.get().strip()
-            color = "white" if valid else COLOR_ERROR
-            s_entry.config(bg=color)
-            e_entry.config(bg=color)
+            # "invalid" zeichnet im Theme einen roten Rahmen um das Feld
+            state = ["!invalid"] if valid else ["invalid"]
+            s_entry.state(state)
+            e_entry.state(state)
 
         s_var.trace_add("write", validate_pages)
         e_var.trace_add("write", validate_pages)
@@ -408,10 +434,11 @@ class ScoreGUI:
             row_frame.destroy()
 
         row_frame.columnconfigure(3, weight=1)
-        btn_col = tk.Frame(row_frame, bg=COLOR_BG)
-        btn_col.grid(row=0, column=3, rowspan=3, sticky="e", padx=10)
-        tk.Button(btn_col, text="Duplizieren", command=duplicate_row).pack(fill="x", pady=1)
-        tk.Button(btn_col, text="Entfernen", fg="red", command=remove_row).pack(fill="x", pady=1)
+        btn_col = ttk.Frame(row_frame)
+        btn_col.grid(row=0, column=3, rowspan=3, sticky="e", padx=(10, 0))
+        ttk.Button(btn_col, text="Duplizieren", command=duplicate_row).pack(fill="x", pady=2)
+        ttk.Button(btn_col, text="Entfernen", style="Danger.TButton",
+                   command=remove_row).pack(fill="x", pady=2)
 
         row_frame.state_vars = {"file": f_var, "voice": v_var,
                                 "start": s_var, "end": e_var}
@@ -586,6 +613,6 @@ class ScoreGUI:
 if __name__ == "__main__":
     root = tk.Tk()
     gui = ScoreGUI(root)
-    tk.Button(root, text="Alle exportieren", width=20, bg="#d0e0ff",
-              command=gui.export_all).pack(pady=10)
+    ttk.Button(root, text="Alle exportieren", style="Accent.TButton", width=20,
+               command=gui.export_all).pack(pady=(4, 10))
     root.mainloop()

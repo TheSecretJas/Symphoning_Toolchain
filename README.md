@@ -3,6 +3,14 @@
 
 Diese Dokumentation beschreibt die Funktionsweise und Bedienung der beiden Python-Tools `Exporter_Drucken.py` und `Sinfonie_Generator.py`. Die Tools bilden eine Pipeline zur Verarbeitung, Zusammenführung und Druckvorbereitung von unserem Notenmaterial.
 
+## Installation
+
+```bash
+pip install -r requirements.txt
+```
+
+Pflicht ist nur `pypdf`. Die übrigen Pakete sind optional: `pypdfium2` und `Pillow` für die Vorschau im Druckexporter, `sv-ttk` für die moderne Windows-11-Optik und `darkdetect`, damit beide Oberflächen dem hellen oder dunklen Systemmodus folgen. Fehlen sie, laufen die Tools im klassischen Tkinter-Design weiter.
+
 ## 1. `Exporter_Drucken.py`: Druckvorbereitung
 
 Dieses Tool führt Einzelstimmen aus verschiedenen Werken über eine grafische Oberfläche zusammen und berechnet das benötigte Druckvolumen für das Orchester.

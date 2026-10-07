@@ -45,7 +45,7 @@ jobs:
       - name: Abhaengigkeiten installieren
         run: |
           python -m pip install --upgrade pip
-          pip install pypdf pypdfium2 pillow pyinstaller
+          pip install -r requirements.txt pyinstaller
 
       - name: Versionsinfos erzeugen (Autor, Produkt, Version)
         run: |
@@ -57,6 +57,7 @@ jobs:
           pyinstaller --onefile --windowed
           --name Exporter_Drucken
           --version-file version_exporter.txt
+          --collect-data sv_ttk
           "${{ env.EXPORTER_SRC }}"
 
       - name: Sinfonie-Generator bauen (Fensteranwendung)
@@ -64,6 +65,7 @@ jobs:
           pyinstaller --onefile --windowed
           --name Sinfonie_Generator
           --version-file version_sinfonie.txt
+          --collect-data sv_ttk
           "${{ env.SINFONIE_SRC }}"
 
       - name: Release erstellen oder Executables aktualisieren

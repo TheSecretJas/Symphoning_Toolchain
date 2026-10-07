@@ -23,6 +23,8 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from pypdf import PdfReader, PdfWriter, Transformation
 
+from ui_theme import apply_theme, style_canvas, style_text
+
 try:
     import pypdfium2 as pdfium
     from PIL import Image, ImageFilter, ImageTk
@@ -45,13 +47,13 @@ SCALE_MAX = 200
 
 # Spaltenbreiten der Tabelle in Pixeln (Kopfzeile und Zeilen identisch,
 # damit die Ueberschriften unabhaengig von der Schrift buendig sind)
-COLUMNS = (("Stimme", 190, "w"), ("Seiten", 60, "e"), ("Kopien", 90, "e"),
-           ("Gesamt", 70, "e"), ("Skalierung %", 120, "e"))
+COLUMNS = (("Stimme", 180, "w"), ("Seiten", 60, "e"), ("Kopien", 140, "e"),
+           ("Gesamt", 70, "e"), ("Skalierung %", 150, "e"))
 
 # Vorschau: Anzeigehoehe in Pixeln und Grauwert, unter dem ein Pixel als
 # Inhalt (Notentinte) gilt. Ein schmaler Rand wird bei der Inhaltssuche
 # ignoriert, damit dunkle Scankanten nicht als Inhalt zaehlen.
-PREVIEW_HEIGHT = 400
+PREVIEW_HEIGHT = 380
 PREVIEW_PANEL_WIDTH = 330
 INK_THRESHOLD = 160
 EDGE_IGNORE = 0.015
@@ -158,9 +160,10 @@ class PreviewPanel:
     sind.
     """
 
-    def __init__(self, parent, on_apply):
+    def __init__(self, parent, on_apply, palette):
         self.on_apply = on_apply
-        self.frame = ttk.LabelFrame(parent, text="Vorschau", padding=6)
+        self.palette = palette
+        self.frame = ttk.LabelFrame(parent, text="Vorschau", padding=10)
         self.docs = {}    # Pfad -> PdfDocument
         self.cache = {}   # (Pfad, Seite) -> (Bild, max. Faktor)
         self.pages = []   # [(Pfad, Seite)] der gewaehlten Stimme
@@ -173,10 +176,10 @@ class PreviewPanel:
 
         self.title_var = tk.StringVar(value="Stimme in der Tabelle anklicken.")
         ttk.Label(self.frame, textvariable=self.title_var,
-                  font=("TkDefaultFont", 9, "bold")).pack(anchor="w")
+                  style="Strong.TLabel").pack(anchor="w")
 
         nav = ttk.Frame(self.frame)
-        nav.pack(fill="x", pady=(4, 4))
+        nav.pack(fill="x", pady=(6, 8))
         self.prev_btn = ttk.Button(nav, text="‹", width=3, command=lambda: self.turn(-1))
         self.prev_btn.pack(side="left")
         self.page_var = tk.StringVar(value="")
@@ -186,17 +189,17 @@ class PreviewPanel:
         self.next_btn.pack(side="right")
 
         self.canvas = tk.Canvas(self.frame, width=round(PREVIEW_HEIGHT / 1.414) + 8,
-                                height=PREVIEW_HEIGHT + 8, bg="#b8b8b8",
-                                highlightthickness=0)
+                                height=PREVIEW_HEIGHT + 8)
+        style_canvas(self.canvas, palette, "preview_bg")
         self.canvas.pack()
 
         self.warn_var = tk.StringVar(value="")
-        self.warn_label = tk.Label(self.frame, textvariable=self.warn_var, anchor="w",
-                                   justify="left", wraplength=PREVIEW_PANEL_WIDTH - 20)
-        self.warn_label.pack(fill="x", pady=(4, 0))
+        self.warn_label = ttk.Label(self.frame, textvariable=self.warn_var, anchor="w",
+                                    justify="left", wraplength=PREVIEW_PANEL_WIDTH - 30)
+        self.warn_label.pack(fill="x", pady=(8, 0))
 
         max_row = ttk.Frame(self.frame)
-        max_row.pack(fill="x", pady=(2, 0))
+        max_row.pack(fill="x", pady=(6, 0))
         self.max_var = tk.StringVar(value="")
         ttk.Label(max_row, textvariable=self.max_var).pack(side="left")
         self.apply_btn = ttk.Button(max_row, text="Übernehmen", state="disabled",
@@ -301,7 +304,7 @@ class PreviewPanel:
         try:
             image, _ = self._render(self.pages[self.index])
         except Exception as e:
-            self.warn_label.configure(fg="#b00000")
+            self.warn_label.configure(foreground=self.palette["error"])
             self.warn_var.set(f"Seite kann nicht angezeigt werden:\n{e}")
             return
 
@@ -328,16 +331,16 @@ class PreviewPanel:
         page_max = self.cache[key][1]
         dw, dh = int(self.canvas["width"]) - 8, int(self.canvas["height"]) - 8
         cut = self.factor > page_max + 0.005
-        color = "#d00000" if cut else "#2a8a2a"
+        color = self.palette["error"] if cut else self.palette["success"]
         self.canvas.delete("frame")
         self.canvas.create_rectangle(3, 3, dw + 4, dh + 4, outline=color,
                                      width=2, tags="frame")
         if cut:
-            self.warn_label.configure(fg="#b00000")
+            self.warn_label.configure(foreground=self.palette["error"])
             self.warn_var.set(f"Auf dieser Seite wird Inhalt abgeschnitten "
                               f"(Seite verträgt max. {int(page_max * 100)} %).")
         else:
-            self.warn_label.configure(fg="#2a6a2a")
+            self.warn_label.configure(foreground=self.palette["success"])
             self.warn_var.set("Seite passt vollständig aufs Blatt.")
 
     def apply_max(self):
@@ -401,8 +404,9 @@ class ExporterGUI:
     def __init__(self, master):
         self.master = master
         self.master.title("Druckexporter")
-        self.master.geometry("1100x830")
-        self.master.minsize(900, 760)
+        self.palette = apply_theme(self.master)
+        self.master.geometry("1140x900")
+        self.master.minsize(960, 820)
 
         self.voices = {}
         self.scores = []
@@ -425,50 +429,61 @@ class ExporterGUI:
     # UI-Aufbau
     # ------------------------------------------------------------
     def setup_folder_ui(self):
-        frame = ttk.Frame(self.master, padding=10)
+        # Kopfbereich mit Titel und Kurzbeschreibung
+        head = ttk.Frame(self.master, padding=(16, 14, 16, 4))
+        head.pack(fill="x")
+        ttk.Label(head, text="Druckexporter", style="Title.TLabel").pack(anchor="w")
+        ttk.Label(head, text="Stimmen bündeln, Kopien planen, Skalierung prüfen",
+                  style="Muted.TLabel", foreground=self.palette["muted"]).pack(anchor="w")
+
+        frame = ttk.Frame(self.master, padding=(16, 10, 16, 4))
         frame.pack(fill="x")
 
-        ttk.Label(frame, text="Notenordner:").pack(side="left")
+        ttk.Label(frame, text="Notenordner").pack(side="left")
         self.folder_var = tk.StringVar(value=os.getcwd())
         ttk.Entry(frame, textvariable=self.folder_var).pack(
-            side="left", fill="x", expand=True, padx=5)
+            side="left", fill="x", expand=True, padx=8)
         self.browse_btn = ttk.Button(frame, text="Durchsuchen", command=self.browse_folder)
-        self.browse_btn.pack(side="left", padx=2)
+        self.browse_btn.pack(side="left", padx=(0, 6))
         self.scan_btn = ttk.Button(frame, text="Scannen", command=self.start_scan)
-        self.scan_btn.pack(side="left", padx=2)
+        self.scan_btn.pack(side="left")
 
         # Statuszeile mit Fortschrittsbalken
-        status_frame = ttk.Frame(self.master, padding=(10, 0))
+        status_frame = ttk.Frame(self.master, padding=(16, 2, 16, 6))
         status_frame.pack(fill="x")
         self.status_var = tk.StringVar(value="Bereit.")
-        ttk.Label(status_frame, textvariable=self.status_var).pack(side="left")
+        ttk.Label(status_frame, textvariable=self.status_var, style="Muted.TLabel",
+                  foreground=self.palette["muted"]).pack(side="left")
         self.progress = ttk.Progressbar(status_frame, mode="determinate", length=200)
-        self.progress.pack(side="right", padx=2, pady=4)
+        self.progress.pack(side="right", pady=4)
 
     def setup_table_ui(self):
-        middle = ttk.Frame(self.master, padding=(10, 0))
+        middle = ttk.Frame(self.master, padding=(16, 0))
         middle.pack(fill="both", expand=True)
 
         # Rechts: Vorschau, links: Tabelle mit Kopfzeile
-        self.preview = PreviewPanel(middle, on_apply=self.apply_scale)
+        self.preview = PreviewPanel(middle, on_apply=self.apply_scale, palette=self.palette)
         # Feste Breite, damit das Panel bei wechselnden Texten nicht springt
         self.preview.frame.configure(width=PREVIEW_PANEL_WIDTH)
         self.preview.frame.pack_propagate(False)
-        self.preview.frame.pack(side="right", fill="y", padx=(10, 0))
+        self.preview.frame.pack(side="right", fill="y", padx=(12, 0))
 
-        left = ttk.Frame(middle)
+        left = ttk.LabelFrame(middle, text="Stimmen", padding=(10, 6, 6, 6))
         left.pack(side="left", fill="both", expand=True)
 
-        header = ttk.Frame(left, padding=(0, 4))
+        header = ttk.Frame(left, padding=(0, 2, 0, 6))
         header.pack(fill="x")
         self._configure_columns(header)
         for col, (text, _, anchor) in enumerate(COLUMNS):
-            ttk.Label(header, text=text, font=("TkDefaultFont", 9, "bold")).grid(
+            ttk.Label(header, text=text, style="Muted.TLabel",
+                      foreground=self.palette["muted"]).grid(
                 row=0, column=col, sticky=anchor, padx=4)
+        ttk.Separator(left).pack(fill="x", pady=(0, 4))
 
         container = ttk.Frame(left)
         container.pack(fill="both", expand=True)
-        self.canvas = tk.Canvas(container, highlightthickness=0)
+        self.canvas = tk.Canvas(container)
+        style_canvas(self.canvas, self.palette)
         scrollbar = ttk.Scrollbar(container, orient="vertical", command=self.canvas.yview)
         self.table_frame = ttk.Frame(self.canvas)
 
@@ -485,21 +500,22 @@ class ExporterGUI:
         self.canvas.bind_all("<Button-5>", lambda e: self.canvas.yview_scroll(1, "units"))
 
     def setup_bottom_ui(self):
-        frame = ttk.Frame(self.master, padding=10)
+        frame = ttk.Frame(self.master, padding=(16, 12, 16, 8))
         frame.pack(fill="x")
 
         self.total_var = tk.StringVar(value="Gesamtdruckvolumen: 0 Seiten")
         ttk.Label(frame, textvariable=self.total_var,
-                  font=("TkDefaultFont", 10, "bold")).pack(side="left")
+                  style="Strong.TLabel").pack(side="left")
 
-        ttk.Button(frame, text="Ausgabeordner öffnen",
-                   command=self.open_output).pack(side="right", padx=2)
-        self.export_btn = ttk.Button(frame, text="Exportieren",
+        self.export_btn = ttk.Button(frame, text="Exportieren", style="Accent.TButton",
                                      command=self.start_export, state="disabled")
-        self.export_btn.pack(side="right", padx=2)
+        self.export_btn.pack(side="right")
+        ttk.Button(frame, text="Ausgabeordner öffnen",
+                   command=self.open_output).pack(side="right", padx=(0, 6))
 
         self.log_text = tk.Text(self.master, height=6, state="disabled")
-        self.log_text.pack(fill="x", padx=10, pady=(0, 10))
+        style_text(self.log_text, self.palette)
+        self.log_text.pack(fill="x", padx=16, pady=(0, 16))
 
     @staticmethod
     def _configure_columns(frame):
@@ -630,7 +646,7 @@ class ExporterGUI:
     def add_row(self, name, pages, default_copies, scalable=True):
         """Fuegt eine Tabellenzeile mit editierbarer Kopienzahl hinzu."""
         row = ttk.Frame(self.table_frame)
-        row.pack(fill="x", pady=1)
+        row.pack(fill="x", pady=2)
         self._configure_columns(row)
 
         name_label = ttk.Label(row, text=name, cursor="hand2")
@@ -680,9 +696,10 @@ class ExporterGUI:
         if name == self.selected:
             return
         if self.selected in self.name_labels:
-            self.name_labels[self.selected].configure(font="TkDefaultFont")
+            self.name_labels[self.selected].configure(style="TLabel", foreground="")
         self.selected = name
-        self.name_labels[name].configure(font=("TkDefaultFont", 9, "bold"))
+        self.name_labels[name].configure(style="Strong.TLabel",
+                                         foreground=self.palette["accent"])
         scale_var = self._row(name)[4]
         self.preview.show_voice(name, self._pages_of(name),
                                 self.get_scale(scale_var) / 100, scale_var is not None)
