@@ -47,16 +47,23 @@ jobs:
           python -m pip install --upgrade pip
           pip install pypdf pypdfium2 pillow pyinstaller
 
-      - name: Exporter bauen (Konsolenanwendung)
+      - name: Versionsinfos erzeugen (Autor, Produkt, Version)
+        run: |
+          python .github/scripts/make_version_info.py version_exporter.txt "${{ github.ref_name }}" Exporter_Drucken "Druckexporter"
+          python .github/scripts/make_version_info.py version_sinfonie.txt "${{ github.ref_name }}" Sinfonie_Generator "Sinfonie Generator"
+
+      - name: Exporter bauen (Fensteranwendung, ohne Konsole)
         run: >
-          pyinstaller --onefile --console
+          pyinstaller --onefile --windowed
           --name Exporter_Drucken
+          --version-file version_exporter.txt
           "${{ env.EXPORTER_SRC }}"
 
       - name: Sinfonie-Generator bauen (Fensteranwendung)
         run: >
           pyinstaller --onefile --windowed
           --name Sinfonie_Generator
+          --version-file version_sinfonie.txt
           "${{ env.SINFONIE_SRC }}"
 
       - name: Release erstellen oder Executables aktualisieren
