@@ -8,6 +8,8 @@
 # Ablauf: Ordner waehlen -> Scannen -> Kopienzahlen pruefen/anpassen
 # -> Exportieren. Scan und Export laufen in einem Hintergrund-Thread
 # mit Fortschrittsanzeige, damit die Oberflaeche nicht einfriert.
+# Die Vorschau rechts zeigt die gewaehlte Stimme mit der eingestellten
+# Skalierung (benoetigt pypdfium2 und Pillow, sonst nur ein Hinweis).
 # Namenskonvention unveraendert: Stimme = Suffix nach dem letzten
 # Unterstrich, "Partitur" wird unveraendert kopiert.
 # ----------------------------------------------------------------
@@ -20,6 +22,12 @@ import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from pypdf import PdfReader, PdfWriter, Transformation
+
+try:
+    import pypdfium2 as pdfium
+    from PIL import Image, ImageFilter, ImageTk
+except ImportError:  # Vorschau ist optional, Export funktioniert ohne
+    pdfium = None
 
 OUTPUT_FOLDER = "Drucken"
 
@@ -39,6 +47,14 @@ SCALE_MAX = 200
 # damit die Ueberschriften unabhaengig von der Schrift buendig sind)
 COLUMNS = (("Stimme", 190, "w"), ("Seiten", 60, "e"), ("Kopien", 90, "e"),
            ("Gesamt", 70, "e"), ("Skalierung %", 120, "e"))
+
+# Vorschau: Anzeigehoehe in Pixeln und Grauwert, unter dem ein Pixel als
+# Inhalt (Notentinte) gilt. Ein schmaler Rand wird bei der Inhaltssuche
+# ignoriert, damit dunkle Scankanten nicht als Inhalt zaehlen.
+PREVIEW_HEIGHT = 400
+PREVIEW_PANEL_WIDTH = 330
+INK_THRESHOLD = 160
+EDGE_IGNORE = 0.015
 
 
 def get_copy_count(voice_name):
@@ -105,6 +121,230 @@ def scale_page_centered(page, factor):
         .translate(cx * (1 - factor), cy * (1 - factor)))
 
 
+def max_scale_without_crop(image):
+    """Groesster Skalierungsfaktor, bei dem kein Inhalt ueber den Rand ragt.
+
+    Sucht die Bounding-Box der dunklen Pixel und berechnet, wie weit
+    sie um die Seitenmitte wachsen kann, bis sie den Rand beruehrt.
+    """
+    w, h = image.size
+    mx, my = round(w * EDGE_IGNORE), round(h * EDGE_IGNORE)
+    ink = (image.convert("L")
+           .point(lambda v: 255 if v < INK_THRESHOLD else 0)
+           .filter(ImageFilter.MedianFilter(3)))  # einzelne Staubpunkte weg
+    bbox = ink.crop((mx, my, w - mx, h - my)).getbbox()
+    limit = SCALE_MAX / 100
+    if bbox is None:
+        return limit
+    x0, y0, x1, y1 = bbox[0] + mx, bbox[1] + my, bbox[2] + mx, bbox[3] + my
+    cx, cy = w / 2, h / 2
+    if x0 < cx:
+        limit = min(limit, cx / (cx - x0))
+    if x1 > cx:
+        limit = min(limit, cx / (x1 - cx))
+    if y0 < cy:
+        limit = min(limit, cy / (cy - y0))
+    if y1 > cy:
+        limit = min(limit, cy / (y1 - cy))
+    return limit
+
+
+class PreviewPanel:
+    """Seitenvorschau mit der eingestellten Skalierung.
+
+    Seiten werden einmal gerendert und zwischengespeichert, die
+    Skalierung wird danach nur noch im Bild nachgebildet (gleiche
+    Rechnung wie scale_page_centered), damit Aenderungen sofort sichtbar
+    sind.
+    """
+
+    def __init__(self, parent, on_apply):
+        self.on_apply = on_apply
+        self.frame = ttk.LabelFrame(parent, text="Vorschau", padding=6)
+        self.docs = {}    # Pfad -> PdfDocument
+        self.cache = {}   # (Pfad, Seite) -> (Bild, max. Faktor)
+        self.pages = []   # [(Pfad, Seite)] der gewaehlten Stimme
+        self.index = 0
+        self.factor = 1.0
+        self.scalable = False
+        self.voice_max = None
+        self.job = 0      # Kennung, um veraltete Hintergrundberechnungen abzubrechen
+        self.photo = None
+
+        self.title_var = tk.StringVar(value="Stimme in der Tabelle anklicken.")
+        ttk.Label(self.frame, textvariable=self.title_var,
+                  font=("TkDefaultFont", 9, "bold")).pack(anchor="w")
+
+        nav = ttk.Frame(self.frame)
+        nav.pack(fill="x", pady=(4, 4))
+        self.prev_btn = ttk.Button(nav, text="‹", width=3, command=lambda: self.turn(-1))
+        self.prev_btn.pack(side="left")
+        self.page_var = tk.StringVar(value="")
+        ttk.Label(nav, textvariable=self.page_var, anchor="center").pack(
+            side="left", fill="x", expand=True)
+        self.next_btn = ttk.Button(nav, text="›", width=3, command=lambda: self.turn(1))
+        self.next_btn.pack(side="right")
+
+        self.canvas = tk.Canvas(self.frame, width=round(PREVIEW_HEIGHT / 1.414) + 8,
+                                height=PREVIEW_HEIGHT + 8, bg="#b8b8b8",
+                                highlightthickness=0)
+        self.canvas.pack()
+
+        self.warn_var = tk.StringVar(value="")
+        self.warn_label = tk.Label(self.frame, textvariable=self.warn_var, anchor="w",
+                                   justify="left", wraplength=PREVIEW_PANEL_WIDTH - 20)
+        self.warn_label.pack(fill="x", pady=(4, 0))
+
+        max_row = ttk.Frame(self.frame)
+        max_row.pack(fill="x", pady=(2, 0))
+        self.max_var = tk.StringVar(value="")
+        ttk.Label(max_row, textvariable=self.max_var).pack(side="left")
+        self.apply_btn = ttk.Button(max_row, text="Übernehmen", state="disabled",
+                                    command=self.apply_max)
+        self.apply_btn.pack(side="right")
+
+        if pdfium is None:
+            self.title_var.set("Vorschau nicht verfügbar.")
+            self.warn_var.set("Dafür einmalig installieren:\n"
+                              "pip install pypdfium2 pillow")
+        self._update_nav()
+
+    # -- Daten ---------------------------------------------------
+    def reset(self):
+        """Nach einem neuen Scan: Dokumente schliessen, Cache leeren."""
+        self.job += 1
+        for doc in self.docs.values():
+            doc.close()
+        self.docs.clear()
+        self.cache.clear()
+        self.pages = []
+        self.canvas.delete("all")
+        self.title_var.set("Stimme in der Tabelle anklicken." if pdfium
+                           else "Vorschau nicht verfügbar.")
+        self.page_var.set("")
+        self.max_var.set("")
+        if pdfium:
+            self.warn_var.set("")
+        self.apply_btn.configure(state="disabled")
+        self._update_nav()
+
+    def show_voice(self, name, pages, factor, scalable):
+        if pdfium is None:
+            return
+        self.job += 1
+        self.title_var.set(name)
+        self.pages = pages
+        self.index = 0
+        self.factor = factor
+        self.scalable = scalable
+        self.voice_max = None
+        self.apply_btn.configure(state="disabled")
+        self.max_var.set("Max. ohne Beschnitt: wird berechnet…")
+        self.redraw()
+        # Maximale Skalierung ueber alle Seiten schrittweise berechnen,
+        # damit die Oberflaeche dabei bedienbar bleibt
+        self.frame.after(1, self._compute_max, self.job, 0, SCALE_MAX / 100)
+
+    def set_factor(self, factor):
+        self.factor = factor
+        self.redraw()
+
+    def _render(self, key):
+        if key not in self.cache:
+            path, idx = key
+            if path not in self.docs:
+                self.docs[path] = pdfium.PdfDocument(path)
+            page = self.docs[path][idx]
+            # Doppelte Aufloesung, damit auch vergroesserte Ansichten scharf sind
+            scale = 2 * PREVIEW_HEIGHT / page.get_height()
+            image = page.render(scale=scale).to_pil().convert("RGB")
+            page.close()
+            self.cache[key] = (image, max_scale_without_crop(image))
+        return self.cache[key]
+
+    def _compute_max(self, job, i, current):
+        if job != self.job:
+            return  # inzwischen andere Stimme gewaehlt
+        if i >= len(self.pages):
+            self.voice_max = current
+            percent = int(current * 100)
+            self.max_var.set(f"Max. ohne Beschnitt: {percent} %")
+            if self.scalable:
+                self.apply_btn.configure(state="normal")
+            self._update_warning()
+            return
+        try:
+            _, page_max = self._render(self.pages[i])
+            current = min(current, page_max)
+        except Exception:
+            pass  # Fehler zeigt redraw() fuer die betroffene Seite an
+        self.max_var.set(f"Max. ohne Beschnitt: berechne… ({i + 1}/{len(self.pages)})")
+        self.frame.after(1, self._compute_max, job, i + 1, current)
+
+    # -- Anzeige -------------------------------------------------
+    def turn(self, step):
+        if self.pages:
+            self.index = (self.index + step) % len(self.pages)
+            self.redraw()
+
+    def _update_nav(self):
+        state = "normal" if len(self.pages) > 1 else "disabled"
+        self.prev_btn.configure(state=state)
+        self.next_btn.configure(state=state)
+
+    def redraw(self):
+        self._update_nav()
+        self.canvas.delete("all")
+        if not self.pages:
+            return
+        self.page_var.set(f"Seite {self.index + 1} / {len(self.pages)}")
+        try:
+            image, _ = self._render(self.pages[self.index])
+        except Exception as e:
+            self.warn_label.configure(fg="#b00000")
+            self.warn_var.set(f"Seite kann nicht angezeigt werden:\n{e}")
+            return
+
+        # Seite auf Anzeigegroesse bringen und wie beim Export um die
+        # Mitte skalieren; was ueber den Rand ragt, faellt weg
+        dh = PREVIEW_HEIGHT
+        dw = round(image.width * dh / image.height)
+        cw, ch = max(1, round(dw * self.factor)), max(1, round(dh * self.factor))
+        shown = Image.new("RGB", (dw, dh), "white")
+        shown.paste(image.resize((cw, ch), Image.BILINEAR),
+                    ((dw - cw) // 2, (dh - ch) // 2))
+
+        self.canvas.configure(width=dw + 8, height=dh + 8)
+        self.photo = ImageTk.PhotoImage(shown)
+        self.canvas.create_image(4, 4, image=self.photo, anchor="nw")
+        self._update_warning()
+
+    def _update_warning(self):
+        if not self.pages:
+            return
+        key = self.pages[self.index]
+        if key not in self.cache:
+            return
+        page_max = self.cache[key][1]
+        dw, dh = int(self.canvas["width"]) - 8, int(self.canvas["height"]) - 8
+        cut = self.factor > page_max + 0.005
+        color = "#d00000" if cut else "#2a8a2a"
+        self.canvas.delete("frame")
+        self.canvas.create_rectangle(3, 3, dw + 4, dh + 4, outline=color,
+                                     width=2, tags="frame")
+        if cut:
+            self.warn_label.configure(fg="#b00000")
+            self.warn_var.set(f"Auf dieser Seite wird Inhalt abgeschnitten "
+                              f"(Seite verträgt max. {int(page_max * 100)} %).")
+        else:
+            self.warn_label.configure(fg="#2a6a2a")
+            self.warn_var.set("Seite passt vollständig aufs Blatt.")
+
+    def apply_max(self):
+        if self.voice_max is not None:
+            self.on_apply(int(self.voice_max * 100))
+
+
 def collect_pdf_paths(base_folder):
     """Sammelt alle PDF-Pfade aus den Unterordnern (ohne Ausgabeordner)."""
     pdf_paths = []
@@ -161,14 +401,16 @@ class ExporterGUI:
     def __init__(self, master):
         self.master = master
         self.master.title("Druckexporter")
-        self.master.geometry("800x640")
-        self.master.minsize(600, 480)
+        self.master.geometry("1100x830")
+        self.master.minsize(900, 760)
 
         self.voices = {}
         self.scores = []
         # (Stimmenname, Seitenzahl, Kopien-Variable, Summen-Label,
         #  Skalierungs-Variable oder None)
         self.rows = []
+        self.name_labels = {}  # Stimmenname -> Label (Markierung der Auswahl)
+        self.selected = None
         self.msg_queue = queue.Queue()
         self.worker = None
 
@@ -204,14 +446,27 @@ class ExporterGUI:
         self.progress.pack(side="right", padx=2, pady=4)
 
     def setup_table_ui(self):
-        header = ttk.Frame(self.master, padding=(10, 4))
+        middle = ttk.Frame(self.master, padding=(10, 0))
+        middle.pack(fill="both", expand=True)
+
+        # Rechts: Vorschau, links: Tabelle mit Kopfzeile
+        self.preview = PreviewPanel(middle, on_apply=self.apply_scale)
+        # Feste Breite, damit das Panel bei wechselnden Texten nicht springt
+        self.preview.frame.configure(width=PREVIEW_PANEL_WIDTH)
+        self.preview.frame.pack_propagate(False)
+        self.preview.frame.pack(side="right", fill="y", padx=(10, 0))
+
+        left = ttk.Frame(middle)
+        left.pack(side="left", fill="both", expand=True)
+
+        header = ttk.Frame(left, padding=(0, 4))
         header.pack(fill="x")
         self._configure_columns(header)
         for col, (text, _, anchor) in enumerate(COLUMNS):
             ttk.Label(header, text=text, font=("TkDefaultFont", 9, "bold")).grid(
                 row=0, column=col, sticky=anchor, padx=4)
 
-        container = ttk.Frame(self.master, padding=(10, 0))
+        container = ttk.Frame(left)
         container.pack(fill="both", expand=True)
         self.canvas = tk.Canvas(container, highlightthickness=0)
         scrollbar = ttk.Scrollbar(container, orient="vertical", command=self.canvas.yview)
@@ -346,6 +601,9 @@ class ExporterGUI:
         for widget in self.table_frame.winfo_children():
             widget.destroy()
         self.rows.clear()
+        self.name_labels.clear()
+        self.selected = None
+        self.preview.reset()
         gc.collect()  # alte Zeilen-Variablen im Hauptthread finalisieren
 
         for voice_name in sorted(self.voices.keys()):
@@ -375,12 +633,14 @@ class ExporterGUI:
         row.pack(fill="x", pady=1)
         self._configure_columns(row)
 
-        ttk.Label(row, text=name).grid(row=0, column=0, sticky="w", padx=4)
+        name_label = ttk.Label(row, text=name, cursor="hand2")
+        name_label.grid(row=0, column=0, sticky="w", padx=4)
+        self.name_labels[name] = name_label
         ttk.Label(row, text=str(pages)).grid(row=0, column=1, sticky="e", padx=4)
 
         copies_var = tk.StringVar(value=str(default_copies))
-        ttk.Spinbox(row, from_=0, to=99, textvariable=copies_var,
-                    width=5).grid(row=0, column=2, sticky="e", padx=4)
+        copies_box = ttk.Spinbox(row, from_=0, to=99, textvariable=copies_var, width=5)
+        copies_box.grid(row=0, column=2, sticky="e", padx=4)
 
         total_label = ttk.Label(row, text=str(pages * default_copies))
         total_label.grid(row=0, column=3, sticky="e", padx=4)
@@ -388,14 +648,56 @@ class ExporterGUI:
         scale_var = None
         if scalable:
             scale_var = tk.StringVar(value=str(SCALE_DEFAULT))
-            ttk.Spinbox(row, from_=SCALE_MIN, to=SCALE_MAX, increment=1,
-                        textvariable=scale_var, width=5).grid(
-                row=0, column=4, sticky="e", padx=4)
+            scale_box = ttk.Spinbox(row, from_=SCALE_MIN, to=SCALE_MAX, increment=1,
+                                    textvariable=scale_var, width=5)
+            scale_box.grid(row=0, column=4, sticky="e", padx=4)
+            scale_box.bind("<FocusIn>", lambda e: self.select_voice(name), add="+")
+            scale_var.trace_add("write", lambda *args: self.on_scale_change(name))
         else:
             ttk.Label(row, text="–").grid(row=0, column=4, sticky="e", padx=4)
 
+        # Klick auf die Zeile oder Fokus in einem Feld waehlt die Stimme
+        # fuer die Vorschau aus
+        for widget in (row, name_label):
+            widget.bind("<Button-1>", lambda e: self.select_voice(name))
+        copies_box.bind("<FocusIn>", lambda e: self.select_voice(name), add="+")
+
         self.rows.append((name, pages, copies_var, total_label, scale_var))
         copies_var.trace_add("write", lambda *args: self.update_total())
+
+    # ------------------------------------------------------------
+    # Vorschau
+    # ------------------------------------------------------------
+    def _row(self, name):
+        return next(r for r in self.rows if r[0] == name)
+
+    def _pages_of(self, name):
+        if name in self.voices:
+            return [(path, i) for path, count in self.voices[name] for i in range(count)]
+        return [(path, i) for path, _, count in self.scores for i in range(count)]
+
+    def select_voice(self, name):
+        if name == self.selected:
+            return
+        if self.selected in self.name_labels:
+            self.name_labels[self.selected].configure(font="TkDefaultFont")
+        self.selected = name
+        self.name_labels[name].configure(font=("TkDefaultFont", 9, "bold"))
+        scale_var = self._row(name)[4]
+        self.preview.show_voice(name, self._pages_of(name),
+                                self.get_scale(scale_var) / 100, scale_var is not None)
+
+    def on_scale_change(self, name):
+        if name != self.selected:
+            self.select_voice(name)  # z. B. Pfeiltaste ohne vorherigen Klick
+        else:
+            self.preview.set_factor(self.get_scale(self._row(name)[4]) / 100)
+
+    def apply_scale(self, percent):
+        """Uebernimmt die maximale Skalierung ohne Beschnitt."""
+        scale_var = self._row(self.selected)[4] if self.selected else None
+        if scale_var is not None:
+            scale_var.set(str(max(SCALE_MIN, min(SCALE_MAX, percent))))
 
     def get_copies(self, copies_var):
         try:
