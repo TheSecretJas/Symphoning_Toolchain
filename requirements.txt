@@ -1,0 +1,8 @@
+# Pflicht
+pypdf
+# Optional: Vorschau im Druckexporter
+pypdfium2
+pillow
+# Optional: moderne Optik (Windows-11-Theme) und heller/dunkler Systemmodus
+sv-ttk
+darkdetect
